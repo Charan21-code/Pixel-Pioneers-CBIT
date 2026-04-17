@@ -151,22 +151,22 @@ remaining_after = monthly_budget - total_if_approved
 
 st.markdown(f"""
 <div style="border:1px solid {gate_c}44; border-left:6px solid {gate_c};
-            border-radius:8px; padding:18px 22px; background:{COLORS['card_bg']}; margin-bottom:20px;">
-    <b style="font-size:16px; color:{gate_c};">FINANCE GATE: {gate_icon}</b>
-    <div style="font-size:13px; color:#aaa; line-height:2.2; margin-top:12px;">
-        This month's spend:
-            <b style="color:#fff;">${spent_usd:,.0f} / ${monthly_budget:,.0f}
-            ({pct_used:.1f}%)</b><br/>
-        Proposed plan cost:
-            <b>${proposed_cost:,.0f}</b><br/>
-        Overhead ({int((config.FINANCE['overhead_multiplier']-1)*100)}%):
-            <b>+ ${overhead_cost - proposed_cost:,.0f}</b><br/>
-        Total if approved:
-            <b>${total_if_approved:,.0f}</b>
-            &nbsp;(Remaining: <b style="color:{gate_c};">${remaining_after:,.0f}</b>)<br/>
-        <br/>
-        Decision: <b style="color:{gate_c};">{gate_icon} — {gate_reason}</b>
-    </div>
+border-radius:8px; padding:18px 22px; background:{COLORS['card_bg']}; margin-bottom:20px;">
+<b style="font-size:16px; color:{gate_c};">FINANCE GATE: {gate_icon}</b>
+<div style="font-size:13px; color:#aaa; line-height:2.2; margin-top:12px;">
+This month's spend:
+<b style="color:#fff;">${spent_usd:,.0f} / ${monthly_budget:,.0f}
+({pct_used:.1f}%)</b><br/>
+Proposed plan cost:
+<b>${proposed_cost:,.0f}</b><br/>
+Overhead ({int((config.FINANCE['overhead_multiplier']-1)*100)}%):
+<b>+ ${overhead_cost - proposed_cost:,.0f}</b><br/>
+Total if approved:
+<b>${total_if_approved:,.0f}</b>
+&nbsp;(Remaining: <b style="color:{gate_c};">${remaining_after:,.0f}</b>)<br/>
+<br/>
+Decision: <b style="color:{gate_c};">{gate_icon} — {gate_reason}</b>
+</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -234,34 +234,34 @@ r1, r2 = st.columns([2, 3])
 with r1:
     st.markdown(f"""
 <div style="border:1px solid #333; border-radius:10px; padding:18px 22px;
-            background:{COLORS['card_bg']}; text-align:center;">
-    <div style="font-size:42px; font-weight:800; color:{risk_color};">
-        {risk_score:.0f}
-    </div>
-    <div style="font-size:13px; color:#aaa;">out of 100</div>
-    <div style="font-size:15px; font-weight:700; color:{risk_color}; margin-top:6px;">
-        {risk_category}
-    </div>
-    <!-- Risk bar -->
-    <div style="background:#333; border-radius:6px; height:10px; margin-top:14px;">
-        <div style="background:{risk_color}; border-radius:6px; height:10px;
-                    width:{pct_risk}%; transition:width 0.4s;"></div>
-    </div>
-    <div style="font-size:11px; color:#666; margin-top:6px;">
-        0 (safe) ──────────── 100 (critical)
-    </div>
+background:{COLORS['card_bg']}; text-align:center;">
+<div style="font-size:42px; font-weight:800; color:{risk_color};">
+{risk_score:.0f}
+</div>
+<div style="font-size:13px; color:#aaa;">out of 100</div>
+<div style="font-size:15px; font-weight:700; color:{risk_color}; margin-top:6px;">
+{risk_category}
+</div>
+ Risk bar 
+<div style="background:#333; border-radius:6px; height:10px; margin-top:14px;">
+<div style="background:{risk_color}; border-radius:6px; height:10px;
+        width:{pct_risk}%; transition:width 0.4s;"></div>
+</div>
+<div style="font-size:11px; color:#666; margin-top:6px;">
+0 (safe) ──────────── 100 (critical)
+</div>
 </div>
 """, unsafe_allow_html=True)
 
 with r2:
     st.markdown(f"""
 <div style="font-size:13px; color:#aaa; line-height:2.0; padding-top:8px;">
-    <b style="color:#CCC;">Risk Score Components:</b><br/>
-    🏭 OEE deviation penalty &nbsp; — poor OEE raises rework cost<br/>
-    📦 Supply shortage penalty &nbsp; — critical/emergency plants<br/>
-    📈 Demand overshoot penalty &nbsp; — spike anomalies detected<br/>
-    🌱 Carbon penalty exposure &nbsp; — peak-hour ratio<br/>
-    💸 Budget burn rate &nbsp; — spend above 80% threshold<br/>
+<b style="color:#CCC;">Risk Score Components:</b><br/>
+🏭 OEE deviation penalty &nbsp; — poor OEE raises rework cost<br/>
+📦 Supply shortage penalty &nbsp; — critical/emergency plants<br/>
+📈 Demand overshoot penalty &nbsp; — spike anomalies detected<br/>
+🌱 Carbon penalty exposure &nbsp; — peak-hour ratio<br/>
+💸 Budget burn rate &nbsp; — spend above 80% threshold<br/>
 </div>
 """, unsafe_allow_html=True)
 
@@ -278,17 +278,17 @@ if suggestions:
         # Try to highlight potential savings if mentioned in the text
         st.markdown(f"""
 <div style="border:1px solid #333; border-left:5px solid {COLORS['info']};
-            border-radius:0 8px 8px 0; padding:14px 18px; background:{COLORS['card_bg']};
-            margin-bottom:10px;">
-    <b style="color:{COLORS['info']}; font-size:14px;">{icon} &nbsp; Suggestion {j + 1}</b><br/>
-    <span style="font-size:13px; color:#CCC; line-height:1.8;">{sug}</span>
+border-radius:0 8px 8px 0; padding:14px 18px; background:{COLORS['card_bg']};
+margin-bottom:10px;">
+<b style="color:{COLORS['info']}; font-size:14px;">{icon} &nbsp; Suggestion {j + 1}</b><br/>
+<span style="font-size:13px; color:#CCC; line-height:1.8;">{sug}</span>
 </div>
 """, unsafe_allow_html=True)
 else:
     st.markdown(f"""
 <div style="border:1px solid #333; border-radius:8px; padding:16px; background:{COLORS['card_bg']};
-            color:#888; text-align:center;">
-    💡 Run agents (Next Tick) to generate cost-reduction suggestions from the Finance AI.
+color:#888; text-align:center;">
+💡 Run agents (Next Tick) to generate cost-reduction suggestions from the Finance AI.
 </div>
 """, unsafe_allow_html=True)
 
@@ -363,21 +363,22 @@ fin_summary = finance_out.get("summary", "")
 # Build heuristic fallback if agent hasn't run
 if not fin_summary:
     risk_label = "HIGH" if risk_score > 65 else "MEDIUM" if risk_score > 35 else "LOW"
-    fin_summary = (
+    fin_summary = __import__("re").sub(r'\\*\\*(.*?)\\*\\*', r'<b>\\1</b>', (
+
         f"Monthly spend is at **{pct_used:.1f}%** (${spent_usd:,.0f} of ${monthly_budget:,.0f}). "
         f"Finance gate is **{gate_decision}** — proposed plan cost of ${proposed_cost:,.0f} "
         f"{'fits within' if gate_ok else 'exceeds'} the remaining budget. "
         f"Financial risk is **{risk_label}** ({risk_score:.0f}/100); "
         f"{'review cost-optimisation suggestions above.' if suggestions else 'trigger agents to generate suggestions.'}"
-    )
+    ))
 
 if fin_summary:
     st.markdown("---")
     st.subheader("🤖 Finance Agent Narrative")
     st.markdown(f"""
 <div style="border:1px solid {COLORS['info']}44; border-left:5px solid {COLORS['info']};
-            border-radius:8px; padding:14px 18px; background:#0D1B2A;">
-    <span style="font-size:13px; color:#CCC; line-height:1.8;">{fin_summary}</span>
+border-radius:8px; padding:14px 18px; background:#0D1B2A;">
+<span style="font-size:13px; color:#CCC; line-height:1.8;">{fin_summary}</span>
 </div>
 """, unsafe_allow_html=True)
 

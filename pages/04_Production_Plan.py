@@ -167,12 +167,12 @@ overall_msg = (
 
 st.markdown(f"""
 <div style="border:1px solid {gate_color}55; border-left:5px solid {gate_color};
-            border-radius:8px; padding:16px 20px; background:{COLORS['card_bg']}; margin-bottom:20px;">
-    <b style="font-size:16px;">{selected.split('(')[0].strip().upper()} — READINESS CHECK</b>
-    {gate_html}
-    <div style="margin-top:10px; color:{gate_color}; font-weight:bold; font-size:14px;">
-        {overall_msg}
-    </div>
+border-radius:8px; padding:16px 20px; background:{COLORS['card_bg']}; margin-bottom:20px;">
+<b style="font-size:16px;">{selected.split('(')[0].strip().upper()} — READINESS CHECK</b>
+{gate_html}
+<div style="margin-top:10px; color:{gate_color}; font-weight:bold; font-size:14px;">
+{overall_msg}
+</div>
 </div>
 """, unsafe_allow_html=True)
 

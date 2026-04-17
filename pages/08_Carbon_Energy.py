@@ -56,12 +56,12 @@ comp_label = "✅ COMPLIANT" if compliant else "⚠️ PARTIALLY NON-COMPLIANT"
 
 st.markdown(f"""
 <div style="border-left:6px solid {badge}; padding:16px 20px; background:{COLORS['card_bg']};
-            border-radius:0 8px 8px 0; margin:16px 0;">
-    <b style="color:{badge}; font-size:15px;">🌱 Environmentalist Agent Report</b><br/>
-    <span style="font-size:13px; color:#aaa;">Compliance: <b style="color:{badge};">{comp_label}</b>
-        &nbsp;|&nbsp; Peak ratio: <b>{peak_pct:.1f}%</b>
-        (threshold: {config.AGENT['peak_penalty_ratio']*100:.0f}%)</span><br/>
-    <span style="font-size:13px; margin-top:8px; display:block;">{summary}</span>
+border-radius:0 8px 8px 0; margin:16px 0;">
+<b style="color:{badge}; font-size:15px;">🌱 Environmentalist Agent Report</b><br/>
+<span style="font-size:13px; color:#aaa;">Compliance: <b style="color:{badge};">{comp_label}</b>
+&nbsp;|&nbsp; Peak ratio: <b>{peak_pct:.1f}%</b>
+(threshold: {config.AGENT['peak_penalty_ratio']*100:.0f}%)</span><br/>
+<span style="font-size:13px; margin-top:8px; display:block;">{summary}</span>
 </div>
 """, unsafe_allow_html=True)
 

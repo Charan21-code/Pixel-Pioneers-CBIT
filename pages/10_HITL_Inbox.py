@@ -27,50 +27,50 @@ Review, approve, or reject items below. All actions are logged with timestamps.
 """)
 
 try:
-    from hitl.manager import HitlManager
-    hm     = HitlManager()
-    counts = hm.get_counts()
+from hitl.manager import HitlManager
+hm     = HitlManager()
+counts = hm.get_counts()
 except Exception as e:
-    st.error(f"Could not connect to HITL manager: {e}")
-    st.stop()
+st.error(f"Could not connect to HITL manager: {e}")
+st.stop()
 
 total = counts.get("total", 0)
 if total == 0:
-    st.success(
-        "✅ All agents are operating within approved parameters. "
-        "No human review is currently required."
-    )
+st.success(
+"✅ All agents are operating within approved parameters. "
+"No human review is currently required."
+)
 else:
-    st.warning(f"⚠️ **{total} item(s)** awaiting your review across all departments.")
+st.warning(f"⚠️ **{total} item(s)** awaiting your review across all departments.")
 
 # ── 5-Department Tabs ──────────────────────────────────────────────────────────
 DEPT_TABS = [
-    ("⚙️ Operations",      "ops",         "Orchestrator / Scheduler",   COLORS["info"]),
-    ("📦 Procurement",     "procurement",  "Buyer Agent",                COLORS["warning"]),
-    ("💰 Finance",         "finance",      "Finance Agent",              "#A78BFA"),
-    ("🔧 Engineering",     "maintenance",  "Mechanic Agent",             COLORS["critical"]),
-    ("🌱 Sustainability",  "carbon",       "Environmentalist Agent",     COLORS["healthy"]),
+("⚙️ Operations",      "ops",         "Orchestrator / Scheduler",   COLORS["info"]),
+("📦 Procurement",     "procurement",  "Buyer Agent",                COLORS["warning"]),
+("💰 Finance",         "finance",      "Finance Agent",              "#A78BFA"),
+("🔧 Engineering",     "maintenance",  "Mechanic Agent",             COLORS["critical"]),
+("🌱 Sustainability",  "carbon",       "Environmentalist Agent",     COLORS["healthy"]),
 ]
 
 tab_labels = [
-    f"{label} ({counts.get(itype, 0)})"
-    for label, itype, _, _ in DEPT_TABS
+f"{label} ({counts.get(itype, 0)})"
+for label, itype, _, _ in DEPT_TABS
 ]
 tabs = st.tabs(tab_labels)
 
 for tab, (label, itype, source, accent) in zip(tabs, DEPT_TABS):
-    with tab:
-        pending = hm.get_pending(item_type=itype)
+with tab:
+pending = hm.get_pending(item_type=itype)
 
-        if not pending:
-            st.markdown(f"""
-            <div style="text-align:center; padding:30px; color:#666;">
-                <div style="font-size:36px;">✅</div>
-                <div style="font-size:14px; margin-top:8px;">
-                    No pending {label.split()[-1]} items.
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+if not pending:
+st.markdown(f"""
+<div style="text-align:center; padding:30px; color:#666;">
+<div style="font-size:36px;">✅</div>
+<div style="font-size:14px; margin-top:8px;">
+        No pending {label.split()[-1]} items.
+</div>
+</div>
+""", unsafe_allow_html=True)
         else:
             for item in pending:
                 payload  = item.get("payload", {})
@@ -85,25 +85,25 @@ for tab, (label, itype, source, accent) in zip(tabs, DEPT_TABS):
 
                 # Item card
                 st.markdown(f"""
-                <div style="border:1px solid #333; border-left:5px solid {accent};
-                            border-radius:8px; padding:16px 20px; background:{COLORS['card_bg']};
-                            margin-bottom:16px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <b style="font-size:15px; color:{accent};">
-                            {itype.upper()} — Item #{item_id}
-                        </b>
-                        <span style="color:#666; font-size:12px;">
-                            {src} &nbsp;|&nbsp; Submitted: {created}
-                        </span>
-                    </div>
-                    <div style="font-size:12px; color:#aaa; margin-top:4px;">
-                        Facility / Plant: <b style="color:#ddd;">{facility}</b>
-                    </div>
-                    <div style="font-size:13px; margin-top:10px; line-height:1.6;">
-                        {summary}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+<div style="border:1px solid #333; border-left:5px solid {accent};
+                border-radius:8px; padding:16px 20px; background:{COLORS['card_bg']};
+                margin-bottom:16px;">
+<div style="display:flex; justify-content:space-between; align-items:center;">
+<b style="font-size:15px; color:{accent};">
+{itype.upper()} — Item #{item_id}
+</b>
+<span style="color:#666; font-size:12px;">
+{src} &nbsp;|&nbsp; Submitted: {created}
+</span>
+</div>
+<div style="font-size:12px; color:#aaa; margin-top:4px;">
+            Facility / Plant: <b style="color:#ddd;">{facility}</b>
+</div>
+<div style="font-size:13px; margin-top:10px; line-height:1.6;">
+{summary}
+</div>
+</div>
+    """, unsafe_allow_html=True)
 
                 # Expandable payload
                 with st.expander(f"📂 Full Details — Item #{item_id}"):

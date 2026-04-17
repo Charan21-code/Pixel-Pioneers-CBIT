@@ -76,19 +76,19 @@ risk_icon   = "🔴" if risk_level == "high" else "🟡" if risk_level == "mediu
 
 st.markdown(f"""
 <div style="border:1px solid {badge_color}44; border-left:6px solid {badge_color};
-            border-radius:8px; padding:18px 20px; background:{COLORS['card_bg']}; margin-bottom:8px;">
-    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
-        <span style="font-size:16px; font-weight:700; color:{badge_color};">
-            {risk_icon} DEMAND RISK: {risk_level.upper()}
-        </span>
-        <span style="background:{badge_color}22; color:{badge_color}; border:1px solid {badge_color}55;
-                     border-radius:20px; padding:2px 12px; font-size:13px; font-weight:600;">
-            R² Confidence: {r2*100:.1f}%
-        </span>
-    </div>
-    <div style="font-size:14px; color:#CCC; line-height:1.7;">
-        {summary}
-    </div>
+border-radius:8px; padding:18px 20px; background:{COLORS['card_bg']}; margin-bottom:8px;">
+<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
+<span style="font-size:16px; font-weight:700; color:{badge_color};">
+{risk_icon} DEMAND RISK: {risk_level.upper()}
+</span>
+<span style="background:{badge_color}22; color:{badge_color}; border:1px solid {badge_color}55;
+         border-radius:20px; padding:2px 12px; font-size:13px; font-weight:600;">
+R² Confidence: {r2*100:.1f}%
+</span>
+</div>
+<div style="font-size:14px; color:#CCC; line-height:1.7;">
+{summary}
+</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -354,8 +354,8 @@ if recommended_action:
     st.markdown("---")
     st.markdown(f"""
 <div style="border:1px solid {COLORS['healthy']}55; border-left:5px solid {COLORS['healthy']};
-            border-radius:8px; padding:14px 18px; background:#0D2B22;">
-    <b style="color:{COLORS['healthy']}; font-size:14px;">💡 Recommended Action</b><br/>
-    <span style="font-size:13px; color:#CCC;">{recommended_action}</span>
+border-radius:8px; padding:14px 18px; background:#0D2B22;">
+<b style="color:{COLORS['healthy']}; font-size:14px;">💡 Recommended Action</b><br/>
+<span style="font-size:13px; color:#CCC;">{recommended_action}</span>
 </div>
 """, unsafe_allow_html=True)

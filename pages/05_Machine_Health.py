@@ -77,20 +77,20 @@ mechanic_summary = mech_out.get("summary", "Mechanic agent has not run yet.")
 
 st.markdown(f"""
 <div style="border:1px solid #333; border-left:6px solid {risk_color};
-            border-radius:8px; padding:20px; background:{COLORS['card_bg']}; margin-bottom:20px;">
-    <b style="font-size:18px; color:{risk_color};">
-        {selected.split('(')[0].strip().upper()} — MACHINE HEALTH
-    </b>
-    <div style="font-size:13px; color:#aaa; line-height:2.2; margin-top:10px;">
-        Risk Score: <b style="color:{risk_color};">{risk_score:.0f} / 100 — {risk_badge}</b><br/>
-        Average OEE: <b>{oee_pct:.1f}%</b><br/>
-        Min TTF: <b>{ttf_hrs:.1f} hrs</b> &nbsp; <span style="color:#aaa;font-size:12px;">({ttf_note})</span><br/>
-        Avg Temperature: <b>{temp_c:.1f}°C</b><br/>
-        Avg Vibration: <b>{vib_hz:.1f} Hz</b>
-    </div>
-    <div style="margin-top:12px; font-size:12px; color:#888; font-style:italic;">
-        Mechanic Agent: "{(mechanic_summary or '')[:200]}"
-    </div>
+border-radius:8px; padding:20px; background:{COLORS['card_bg']}; margin-bottom:20px;">
+<b style="font-size:18px; color:{risk_color};">
+{selected.split('(')[0].strip().upper()} — MACHINE HEALTH
+</b>
+<div style="font-size:13px; color:#aaa; line-height:2.2; margin-top:10px;">
+Risk Score: <b style="color:{risk_color};">{risk_score:.0f} / 100 — {risk_badge}</b><br/>
+Average OEE: <b>{oee_pct:.1f}%</b><br/>
+Min TTF: <b>{ttf_hrs:.1f} hrs</b> &nbsp; <span style="color:#aaa;font-size:12px;">({ttf_note})</span><br/>
+Avg Temperature: <b>{temp_c:.1f}°C</b><br/>
+Avg Vibration: <b>{vib_hz:.1f} Hz</b>
+</div>
+<div style="margin-top:12px; font-size:12px; color:#888; font-style:italic;">
+Mechanic Agent: "{(mechanic_summary or '')[:200]}"
+</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -102,22 +102,22 @@ if not plant_df.empty and plant_df["Predicted_Time_To_Failure_Hrs"].min() < 24:
     worst   = plant_df.loc[plant_df["Predicted_Time_To_Failure_Hrs"].idxmin()]
 
     st.markdown(f"""
-    <div style="border:2px solid {COLORS['critical']}; background:{COLORS['critical']}15;
-                border-radius:8px; padding:16px 20px; margin-bottom:20px;">
-        <b style="font-size:16px; color:{COLORS['critical']};">
-            🚨 MACHINE FAILURE IMMINENT — {selected.split('(')[0].strip()}
-        </b>
-        <div style="font-size:13px; margin-top:8px; line-height:1.8;">
-            Predicted TTF has dropped to <b style="color:{COLORS['critical']};">{min_ttf:.1f} hrs</b><br/>
-            Temperature: <b>{worst['Machine_Temperature_C']:.1f}°C</b> &nbsp;|&nbsp;
-            Vibration: <b>{worst['Machine_Vibration_Hz']:.1f} Hz</b><br/>
-            <br/>
-            ➔ <b>Mechanic Agent has flagged this for CRITICAL escalation.</b><br/>
-            ➔ This facility has been automatically blacklisted in the Production Plan.<br/>
-            ➔ Rerouting to partner overflow is recommended.
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+<div style="border:2px solid {COLORS['critical']}; background:{COLORS['critical']}15;
+    border-radius:8px; padding:16px 20px; margin-bottom:20px;">
+<b style="font-size:16px; color:{COLORS['critical']};">
+🚨 MACHINE FAILURE IMMINENT — {selected.split('(')[0].strip()}
+</b>
+<div style="font-size:13px; margin-top:8px; line-height:1.8;">
+Predicted TTF has dropped to <b style="color:{COLORS['critical']};">{min_ttf:.1f} hrs</b><br/>
+Temperature: <b>{worst['Machine_Temperature_C']:.1f}°C</b> &nbsp;|&nbsp;
+Vibration: <b>{worst['Machine_Vibration_Hz']:.1f} Hz</b><br/>
+<br/>
+➔ <b>Mechanic Agent has flagged this for CRITICAL escalation.</b><br/>
+➔ This facility has been automatically blacklisted in the Production Plan.<br/>
+➔ Rerouting to partner overflow is recommended.
+</div>
+</div>
+""", unsafe_allow_html=True)
 
     if st.button(
         "🔧 Schedule Emergency Maintenance — Sends to HITL Inbox",

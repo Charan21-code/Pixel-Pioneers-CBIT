@@ -116,44 +116,44 @@ if inv_data:
             with card_cols[col_idx]:
                 st.markdown(f"""
 <div style="border:1px solid #333; border-top:5px solid {s_color};
-            border-radius:8px; padding:16px; background:{COLORS['card_bg']};
-            margin-bottom:12px; min-height:290px;">
-    <div style="font-weight:700; font-size:14px; color:{s_color}; margin-bottom:10px;">
-        🏭 {plant.split("(")[0].strip()}
-        <span style="font-size:11px; color:#888; font-weight:400;">
-            &nbsp;{plant[plant.find("("):] if "(" in plant else ""}
-        </span>
-    </div>
+border-radius:8px; padding:16px; background:{COLORS['card_bg']};
+margin-bottom:12px; min-height:290px;">
+<div style="font-weight:700; font-size:14px; color:{s_color}; margin-bottom:10px;">
+🏭 {plant.split("(")[0].strip()}
+<span style="font-size:11px; color:#888; font-weight:400;">
+&nbsp;{plant[plant.find("("):] if "(" in plant else ""}
+</span>
+</div>
 
-    <!-- Stock progress bar -->
-    <div style="background:#333; border-radius:4px; height:6px; margin-bottom:12px;">
-        <div style="background:{bar_color}; border-radius:4px; height:6px; width:{bar_pct}%;"></div>
-    </div>
+ Stock progress bar 
+<div style="background:#333; border-radius:4px; height:6px; margin-bottom:12px;">
+<div style="background:{bar_color}; border-radius:4px; height:6px; width:{bar_pct}%;"></div>
+</div>
 
-    <div style="font-size:12px; color:#aaa; line-height:2.0;">
-        Current Stock:
-            <b style="color:#fff;">{cur_stock:,} units</b><br/>
-        Threshold:
-            <b>{threshold:,} units</b><br/>
-        Daily Consumption:
-            <b>{daily_use:.0f} units/day</b><br/>
-        Days Remaining:
-            <b style="color:{s_color};">{days_rem:.1f} days</b><br/>
-        Shortfall:
-            <b>{shortfall:,} units</b><br/>
-        Lead Time:
-            <b>~{lead_days} days to receive</b><br/>
-        Reorder Qty:
-            <b>{reorder_q:,} units</b><br/>
-        Est. Cost:
-            <b>${cost_usd:,.0f}</b>
-    </div>
-    <div style="margin-top:12px; font-size:12px; color:{s_color}; font-weight:600;">
-        {cfg['icon']} {cfg['label']}
-    </div>
-    <div style="margin-top:6px; font-size:11px; color:#aaa;">
-        {lead_msg}
-    </div>
+<div style="font-size:12px; color:#aaa; line-height:2.0;">
+Current Stock:
+<b style="color:#fff;">{cur_stock:,} units</b><br/>
+Threshold:
+<b>{threshold:,} units</b><br/>
+Daily Consumption:
+<b>{daily_use:.0f} units/day</b><br/>
+Days Remaining:
+<b style="color:{s_color};">{days_rem:.1f} days</b><br/>
+Shortfall:
+<b>{shortfall:,} units</b><br/>
+Lead Time:
+<b>~{lead_days} days to receive</b><br/>
+Reorder Qty:
+<b>{reorder_q:,} units</b><br/>
+Est. Cost:
+<b>${cost_usd:,.0f}</b>
+</div>
+<div style="margin-top:12px; font-size:12px; color:{s_color}; font-weight:600;">
+{cfg['icon']} {cfg['label']}
+</div>
+<div style="margin-top:6px; font-size:11px; color:#aaa;">
+{lead_msg}
+</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -376,23 +376,24 @@ if not buyer_summary and inv_data:
     parts = []
     if crit_plants:
         parts.append(
-            f"**Critical attention required** at: {', '.join(crit_plants)}. "
+            f"<b>Critical attention required</b> at: {', '.join(crit_plants)}. "
             f"These facilities are at risk of production stoppages."
         )
     if low_plants:
-        parts.append(f"Inventory is **low but manageable** at: {', '.join(low_plants)}.")
+        parts.append(f"Inventory is <b>low but manageable</b> at: {', '.join(low_plants)}.")
     parts.append(
         f"A total of **{reorders_triggered} reorder(s)** have been triggered this cycle, "
         f"with an estimated procurement cost of **${total_reorder_cost:,.0f}**."
     )
     buyer_summary = " ".join(parts)
+    buyer_summary = __import__("re").sub(r'\\*\\*(.*?)\\*\\*', r'<b>\\1</b>', buyer_summary)
 
 if buyer_summary:
     st.markdown(f"""
 <div style="border:1px solid {COLORS['info']}44; border-left:5px solid {COLORS['info']};
-            border-radius:8px; padding:14px 18px; background:#0D1B2A;">
-    <b style="color:{COLORS['info']}; font-size:13px;">🤖 Buyer Agent Narrative</b><br/>
-    <span style="font-size:13px; color:#CCC; line-height:1.8;">{buyer_summary}</span>
+border-radius:8px; padding:14px 18px; background:#0D1B2A;">
+<b style="color:{COLORS['info']}; font-size:13px;">🤖 Buyer Agent Narrative</b><br/>
+<span style="font-size:13px; color:#CCC; line-height:1.8;">{buyer_summary}</span>
 </div>
 """, unsafe_allow_html=True)
 else:
