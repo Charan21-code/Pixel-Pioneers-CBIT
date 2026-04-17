@@ -54,6 +54,9 @@ AGENT = {
 
     # SchedulerAgent
     "min_oee_for_assignment": 80,    # do not assign orders to facilities below this
+
+    # BuyerAgent / Inventory
+    "default_lead_days":      3,      # fallback delivery lead time if quote data unavailable
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -63,6 +66,25 @@ SIMULATION = {
     "delivery_prob_min": 0.75,   # below this → re-schedule
     "max_retries":       3,      # max re-simulation attempts before HITL
     "sim_days":          7,      # simulated horizon in days
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Digital Twin (parameter-driven simulation defaults)
+# ─────────────────────────────────────────────────────────────────────────────
+DIGITAL_TWIN = {
+    "base_capacity":      2000,   # default daily unit capacity per plant at 100% conditions
+    "carbon_kg_per_kwh":  0.43,   # kg CO₂ per kWh consumed
+    "kwh_per_unit":       2.8,    # kWh consumed per manufactured unit
+    "demand_buffer_pct":  0.10,   # 10% safety buffer added to forecast target
+    "scenario_slots":    3,       # max saved scenarios for comparison
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NLP Interface
+# ─────────────────────────────────────────────────────────────────────────────
+NLP = {
+    "history_limit":     20,    # max conversation turns kept in session_state
+    "context_rows_max": 200,   # max rows of agent log fed to Ollama as context
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
