@@ -51,6 +51,16 @@ def orch() -> dict:
     return st.session_state.get("orch_output") or {}
 
 
+def rgba(hex_color: str, alpha: float) -> str:
+    hex_color = hex_color.lstrip("#")
+    if len(hex_color) != 6:
+        return f"rgba(255,165,0,{alpha})"
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
 # ── Page header ──────────────────────────────────────────────────────────────
 st.title("📈 Demand Intelligence")
 st.markdown("Machine-learning demand forecasting, anomaly detection, and product/region breakdown.")
@@ -177,7 +187,7 @@ if has_ml and not proj_df.empty:
         name="Confidence Band Lower", mode="lines",
         line=dict(color=COLORS["warning"], width=0),
         fill="tonexty",
-        fillcolor=f"{COLORS['warning']}22",
+        fillcolor=rgba(COLORS["warning"], 0.13),
         showlegend=False,
         hoverinfo="skip",
     ))

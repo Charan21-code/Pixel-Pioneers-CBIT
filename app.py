@@ -110,11 +110,23 @@ if "dt_chat_history" not in st.session_state:
 if "dt_scenarios" not in st.session_state:
     st.session_state["dt_scenarios"] = {}
 
+if "dt_results" not in st.session_state:
+    st.session_state["dt_results"] = {}
+
 if "selected_plant" not in st.session_state:
     st.session_state["selected_plant"] = None
 
 if "dt_result" not in st.session_state:
     st.session_state["dt_result"] = None
+
+if "dt_result_plant" not in st.session_state:
+    st.session_state["dt_result_plant"] = None
+
+if "dt_controls_context" not in st.session_state:
+    st.session_state["dt_controls_context"] = None
+
+if "dt_plan_override" not in st.session_state:
+    st.session_state["dt_plan_override"] = None
 
 # ==========================================
 # 📊 DATA SLICING (CURSOR)
@@ -154,6 +166,13 @@ def run_orchestrator(force: bool = False) -> None:
             result = orch.run({"df": df, "as_of_time": current_time})
         st.session_state["orch_output"] = result
         st.session_state["orch_cursor"] = cursor
+        st.session_state["dt_result"] = None
+        st.session_state["dt_result_plant"] = None
+        st.session_state["dt_results"] = {}
+        st.session_state["dt_chat_history"] = []
+        st.session_state["dt_scenarios"] = {}
+        st.session_state["dt_controls_context"] = None
+        st.session_state["dt_plan_override"] = None
         logger.info(
             "[app] Orchestrator complete. Status=%s Health=%.1f",
             result.get("final_status", "?"),
@@ -286,6 +305,10 @@ with st.sidebar:
         st.session_state["dt_chat_history"] = []
         st.session_state["dt_scenarios"]  = {}
         st.session_state["dt_result"]     = None
+        st.session_state["dt_result_plant"] = None
+        st.session_state["dt_results"]    = {}
+        st.session_state["dt_controls_context"] = None
+        st.session_state["dt_plan_override"] = None
         try:
             conn = sqlite3.connect(config.DB_PATH)
             conn.execute("DELETE FROM agent_events;")

@@ -44,6 +44,7 @@ _KWH_PER_UNIT        = 2.8     # kWh consumed per manufactured unit (estimate)
 _BASE_HOURS_PER_DAY  = 24      # total available hours
 _MIN_BASE_CAPACITY   = 500     # floor so empty plants still simulate
 _OVERHEAD_MULT       = config.FINANCE.get("overhead_multiplier", 1.15)
+_DEFAULT_BASE_CAPACITY = config.DIGITAL_TWIN.get("base_capacity", 2000)
 
 
 def simulate(
@@ -107,7 +108,7 @@ def simulate(
     # ── Derive base capacity if not provided ──────────────────────────────────
     if base_capacity is None or base_capacity <= 0:
         # Reasonable default: 2,000 units/day for a primary plant at 100% conditions
-        base_capacity = 2000
+        base_capacity = _DEFAULT_BASE_CAPACITY
     base_capacity = max(_MIN_BASE_CAPACITY, int(base_capacity))
 
     target_qty = int(forecast_qty * (1 + demand_buffer_pct))
@@ -258,15 +259,19 @@ def derive_defaults_from_agent_output(
     -------
     dict with keys matching simulate() parameters:
         oee_pct, workforce_pct, forecast_qty, energy_price,
-        base_capacity, downtime_hrs (always 0 as starting point)
+        base_capacity, downtime_hrs (always 0 as starting point),
+        optimise_for, horizon_days, demand_buffer_pct
     """
     defaults = {
         "oee_pct":        91.0,
         "workforce_pct":  95.0,
         "forecast_qty":   2000,
         "energy_price":   0.12,
-        "base_capacity":  2000,
+        "base_capacity":  _DEFAULT_BASE_CAPACITY,
         "downtime_hrs":   0.0,
+        "optimise_for":   "Time",
+        "horizon_days":   config.SIMULATION["sim_days"],
+        "demand_buffer_pct": config.DIGITAL_TWIN.get("demand_buffer_pct", 0.10),
     }
 
     try:

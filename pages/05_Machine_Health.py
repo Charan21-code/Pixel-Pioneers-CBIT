@@ -25,6 +25,16 @@ def orch() -> dict:
     return st.session_state.get("orch_output") or {}
 
 
+def rgba(hex_color: str, alpha: float) -> str:
+    hex_color = hex_color.lstrip("#")
+    if len(hex_color) != 6:
+        return f"rgba(74,158,255,{alpha})"
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
 # ── Page ──────────────────────────────────────────────────────────────────────
 st.title("🔧 Machine Health & OEE (Mechanic Agent)")
 st.markdown("Per-plant sensor telemetry, risk assessment, and maintenance recommendations.")
@@ -155,7 +165,7 @@ else:
             x=plant_df["Timestamp"], y=plant_df["Predicted_Time_To_Failure_Hrs"],
             mode="lines", name="Predicted TTF",
             line=dict(color=COLORS["info"], width=2),
-            fill="tozeroy", fillcolor=f"{COLORS['info']}22",
+            fill="tozeroy", fillcolor=rgba(COLORS["info"], 0.13),
         ))
         fig_ttf.add_hline(
             y=config.AGENT["ttf_critical_hrs"], line_dash="dash",

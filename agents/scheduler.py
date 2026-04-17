@@ -45,6 +45,11 @@ class SchedulerAgent(BaseAgent):
         context["as_of_time"]  : pd.Timestamp
         context["mechanic"]    : MechanicAgent output dict  (required)
         context["forecast"]    : ForecasterAgent output dict (required)
+        context["forecast_qty_override"] : optional plant-specific demand target
+        context["oee_override"]          : optional slider override (0-1 or 0-100)
+        context["workforce_override"]    : optional slider override (0-1 or 0-100)
+        context["demand_buffer_pct"]     : optional safety buffer added to demand
+        context["optimise_for"]          : optional "Time" | "Cost" | "Carbon"
 
         Returns
         -------
@@ -63,7 +68,22 @@ class SchedulerAgent(BaseAgent):
         if df.empty:
             return self._empty_result("No data available in context.")
 
-        forecast_qty = int(forecast_out.get("forecast_qty", 0))
+        optimise_for = str(context.get("optimise_for", "Time") or "Time").title()
+        demand_buffer_pct = float(context.get("demand_buffer_pct", 0.0) or 0.0)
+        forecast_qty = int(
+            context.get("forecast_qty_override", forecast_out.get("forecast_qty", 0)) or 0
+        )
+        planning_target_qty = max(0, int(round(forecast_qty * (1 + demand_buffer_pct))))
+        oee_override_pct = self._normalise_pct_override(context.get("oee_override"))
+        workforce_override_pct = self._normalise_pct_override(context.get("workforce_override"))
+        overrides_active = any(
+            val is not None
+            for val in (
+                context.get("forecast_qty_override"),
+                context.get("oee_override"),
+                context.get("workforce_override"),
+            )
+        ) or demand_buffer_pct > 0 or optimise_for != "Time"
 
         # ── Step 1: Identify critical (blacklisted) facilities ────────────────
         critical_threshold = config.AGENT["risk_score_critical"]
@@ -74,7 +94,7 @@ class SchedulerAgent(BaseAgent):
         ]
 
         # ── Step 2: Build OEE ranking of available facilities ─────────────────
-        ranked_facilities = self._rank_facilities(df, excluded)
+        ranked_facilities = self._rank_facilities(df, excluded, oee_override_pct)
 
         if not ranked_facilities:
             self.publish_signal(
@@ -86,15 +106,26 @@ class SchedulerAgent(BaseAgent):
             return self._empty_result("No available facilities.", excluded=excluded)
 
         # ── Step 3: Call Ollama for a structured shift plan ───────────────────
-        llm_out = self._ask_ollama(ranked_facilities, forecast_qty, excluded)
+        llm_out = {}
+        if not overrides_active:
+            llm_out = self._ask_ollama(ranked_facilities, planning_target_qty, excluded)
         shift_plan = llm_out.get("shift_plan", [])
 
-        # Fallback: greedy assignment if Ollama returned nothing
-        if not shift_plan:
-            shift_plan = self._greedy_assign(ranked_facilities, forecast_qty)
+        # Fallback: deterministic planner when overrides are present or Ollama returned nothing
+        if overrides_active or not shift_plan:
+            shift_plan = self._capacity_assign(
+                ranked_facilities,
+                planning_target_qty,
+                workforce_override_pct=workforce_override_pct,
+                optimise_for=optimise_for,
+            )
 
         # ── Step 4: Compute utilisation metrics ───────────────────────────────
-        total_capacity   = len(ranked_facilities) * _DEFAULT_DAILY_CAPACITY * config.SIMULATION["sim_days"] * 3  # 3 shifts
+        total_capacity = self._estimate_total_capacity(
+            ranked_facilities,
+            workforce_override_pct=workforce_override_pct,
+            optimise_for=optimise_for,
+        )
         expected_thru    = int(sum(s.get("assigned_qty", 0) for s in shift_plan))
         utilisation_pct  = min(100.0, (expected_thru / (total_capacity + 1e-9)) * 100)
 
@@ -118,12 +149,20 @@ class SchedulerAgent(BaseAgent):
             "expected_throughput":  expected_thru,
             "excluded_facilities":  excluded,
             "available_facilities": [f["facility"] for f in ranked_facilities],
+            "planning_target_qty":  planning_target_qty,
+            "parameters_applied": {
+                "optimise_for": optimise_for,
+                "oee_pct": oee_override_pct,
+                "workforce_pct": workforce_override_pct,
+                "demand_buffer_pct": demand_buffer_pct,
+                "forecast_qty": forecast_qty,
+            },
             "summary":              summary,
         }
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    def _rank_facilities(self, df: pd.DataFrame, excluded: list) -> list:
+    def _rank_facilities(self, df: pd.DataFrame, excluded: list, oee_override_pct: float = None) -> list:
         """
         Groups df by Assigned_Facility, computes mean OEE, filters out blacklisted
         facilities and those below min_oee_for_assignment.
@@ -142,6 +181,8 @@ class SchedulerAgent(BaseAgent):
                 oee = float(row["oee_pct"])
                 if fac in excluded:
                     continue
+                if oee_override_pct is not None and len(grouped) == 1:
+                    oee = oee_override_pct
                 if oee < min_oee:
                     continue
                 ranked.append({"facility": fac, "oee_pct": round(oee, 1)})
@@ -193,6 +234,66 @@ Respond ONLY with a JSON object using exactly this structure:
 }}"""
         return self.call_ollama(prompt)
 
+    def _capacity_assign(
+        self,
+        facilities: list,
+        forecast_qty: int,
+        workforce_override_pct: float = None,
+        optimise_for: str = "Time",
+    ) -> list:
+        """
+        Deterministic planner used for local slider overrides and fallback mode.
+        It caps production by estimated 7-day facility capacity, then splits the
+        assigned quantity across AM/PM/Night according to the optimisation goal.
+        """
+        if not facilities or forecast_qty <= 0:
+            return []
+
+        shift_mix = {
+            "Time":   [0.38, 0.34, 0.28],
+            "Cost":   [0.42, 0.33, 0.25],
+            "Carbon": [0.28, 0.27, 0.45],
+        }
+        shifts = ["AM", "PM", "Night"]
+        mix = shift_mix.get(optimise_for, shift_mix["Time"])
+
+        capacities = []
+        total_capacity = self._estimate_total_capacity(
+            facilities,
+            workforce_override_pct=workforce_override_pct,
+            optimise_for=optimise_for,
+            by_facility=True,
+        )
+        total_cap_units = sum(item["capacity_units"] for item in total_capacity)
+        planned_total = min(forecast_qty, total_cap_units)
+        assigned_so_far = 0
+        plan = []
+
+        for idx, fac in enumerate(total_capacity):
+            if idx == len(total_capacity) - 1:
+                facility_target = max(0, planned_total - assigned_so_far)
+            else:
+                capacity_share = fac["capacity_units"] / max(total_cap_units, 1)
+                facility_target = int(round(planned_total * capacity_share))
+                assigned_so_far += facility_target
+
+            shift_assigned = 0
+            for shift_idx, shift_name in enumerate(shifts):
+                if shift_idx == len(shifts) - 1:
+                    assigned_qty = max(0, facility_target - shift_assigned)
+                else:
+                    assigned_qty = int(round(facility_target * mix[shift_idx]))
+                    shift_assigned += assigned_qty
+
+                plan.append({
+                    "facility": fac["facility"],
+                    "shift": shift_name,
+                    "assigned_qty": assigned_qty,
+                    "oee_pct": round(fac["oee_pct"], 1),
+                })
+
+        return plan
+
     def _greedy_assign(self, facilities: list, forecast_qty: int) -> list:
         """
         Simple greedy assignment: distribute forecast_qty proportionally by OEE
@@ -225,6 +326,64 @@ Respond ONLY with a JSON object using exactly this structure:
                 })
 
         return plan
+
+    def _estimate_total_capacity(
+        self,
+        facilities: list,
+        workforce_override_pct: float = None,
+        optimise_for: str = "Time",
+        by_facility: bool = False,
+    ):
+        """
+        Estimate 7-day capacity based on facility OEE, workforce coverage, and
+        optimisation goal. Returns either a summed integer or per-facility rows.
+        """
+        if not facilities:
+            return [] if by_facility else 0
+
+        workforce_factor = (
+            (workforce_override_pct / 100.0)
+            if workforce_override_pct is not None else 1.0
+        )
+        optimise_factor = {
+            "Time": 1.00,
+            "Cost": 0.96,
+            "Carbon": 0.92,
+        }.get(optimise_for, 1.00)
+
+        capacity_rows = []
+        for fac in facilities:
+            oee_factor = max(0.5, min(1.0, float(fac.get("oee_pct", 100.0)) / 100.0))
+            capacity_units = int(
+                round(
+                    _DEFAULT_DAILY_CAPACITY
+                    * config.SIMULATION["sim_days"]
+                    * oee_factor
+                    * workforce_factor
+                    * optimise_factor
+                )
+            )
+            capacity_rows.append({
+                "facility": fac["facility"],
+                "oee_pct": fac.get("oee_pct", 100.0),
+                "capacity_units": max(0, capacity_units),
+            })
+
+        if by_facility:
+            return capacity_rows
+        return sum(item["capacity_units"] for item in capacity_rows)
+
+    def _normalise_pct_override(self, value):
+        """Accept either fractional (0.9) or percentage (90) slider inputs."""
+        if value is None:
+            return None
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+        if value <= 1.5:
+            value *= 100.0
+        return max(50.0, min(100.0, value))
 
     def _build_summary(self, shift_plan: list, excluded: list, util_pct: float) -> str:
         n_shifts    = len(shift_plan)

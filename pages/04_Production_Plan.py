@@ -101,12 +101,13 @@ st.markdown("---")
 # ═══════════════════════════════════════════════════════════════════════════════
 st.subheader("🔍 Plant-Specific Shift Plan")
 
-selected = st.selectbox(
-    "Select Plant",
-    options=plants,
-    index=0,
-    key="plan_plant_selector_p4",
-)
+preferred_plant = st.session_state.get("selected_plant")
+if st.session_state.get("plan_plant_selector_p4") not in plants:
+    st.session_state["plan_plant_selector_p4"] = (
+        preferred_plant if preferred_plant in plants else plants[0]
+    )
+
+selected = st.selectbox("Select Plant", options=plants, key="plan_plant_selector_p4")
 if selected:
     st.session_state["selected_plant"] = selected
 
@@ -181,16 +182,39 @@ st.subheader("⚙️ Plan Constraints")
 st.caption("Defaults pulled live from agent outputs. Adjust then regenerate.")
 
 # Live defaults from orch output
-live_oee  = float(plant_risk.get("oee_pct", 90))
-live_wf   = float(min(100, max(50, wf_pct)))
-live_fq   = int(out.get("forecast", {}).get("forecast_qty", 10000)) // max(1, len(plants))
+plan_override = st.session_state.get("dt_plan_override") or {}
+override_active = plan_override.get("plant") == selected
+
+live_oee = float(plan_override.get("oee_pct", plant_risk.get("oee_pct", 90)) if override_active else plant_risk.get("oee_pct", 90))
+live_wf = float(plan_override.get("workforce_pct", min(100, max(50, wf_pct))) if override_active else min(100, max(50, wf_pct)))
+live_buf = int(round((plan_override.get("demand_buffer_pct", 0.10) if override_active else 0.10) * 100))
+live_opt = plan_override.get("optimise_for", "Time") if override_active else "Time"
+live_fq = int(plan_override.get("forecast_qty", out.get("forecast", {}).get("forecast_qty", 10000) // max(1, len(plants))))
+
+slider_context = (
+    st.session_state.get("orch_cursor"),
+    selected,
+    plan_override.get("applied_at") if override_active else None,
+)
+if st.session_state.get("p4_controls_context") != slider_context:
+    st.session_state["p4_oee"] = int(min(100, max(50, live_oee)))
+    st.session_state["p4_wf"] = int(min(100, max(50, live_wf)))
+    st.session_state["p4_buf"] = int(min(30, max(0, live_buf)))
+    st.session_state["p4_opt"] = live_opt if live_opt in ["Time", "Cost", "Carbon"] else "Time"
+    st.session_state["p4_controls_context"] = slider_context
+
+if override_active:
+    st.info(
+        f"Digital Twin parameters are loaded for {selected.split('(')[0].strip()} "
+        f"with a demand target of {live_fq:,} units."
+    )
 
 sl1, sl2, sl3 = st.columns(3)
 with sl1:
     oee_slider = st.slider(
         "OEE %",
         min_value=50, max_value=100,
-        value=int(min(100, max(50, live_oee))),
+        value=st.session_state["p4_oee"],
         help="Defaults from MechanicAgent live output",
         key="p4_oee",
     )
@@ -198,7 +222,7 @@ with sl2:
     wf_slider = st.slider(
         "Workforce Availability %",
         min_value=50, max_value=100,
-        value=int(min(100, max(50, live_wf))),
+        value=st.session_state["p4_wf"],
         help="Defaults from live Workforce_Deployed / Required",
         key="p4_wf",
     )
@@ -206,12 +230,17 @@ with sl3:
     buf_slider = st.slider(
         "Demand Buffer %",
         min_value=0, max_value=30,
-        value=10,
+        value=st.session_state["p4_buf"],
         help="Safety margin added over forecast quantity",
         key="p4_buf",
     )
 
-opt_for = st.selectbox("Optimise For", ["Time", "Cost", "Carbon"], key="p4_opt")
+opt_for = st.selectbox(
+    "Optimise For",
+    ["Time", "Cost", "Carbon"],
+    index=["Time", "Cost", "Carbon"].index(st.session_state["p4_opt"]),
+    key="p4_opt",
+)
 
 if st.button("⟳ Generate Plan for This Plant", key=f"p4_gen_{selected}", type="primary"):
     try:
@@ -223,9 +252,10 @@ if st.button("⟳ Generate Plan for This Plant", key=f"p4_gen_{selected}", type=
                 "as_of_time":  current_time,
                 "mechanic":    mech_out,
                 "forecast":    out.get("forecast", {}),
+                "forecast_qty_override": live_fq,
                 # Overrides from sliders
-                "oee_override":       oee_slider / 100,
-                "workforce_override": wf_slider / 100,
+                "oee_override":       oee_slider,
+                "workforce_override": wf_slider,
                 "demand_buffer_pct":  buf_slider / 100,
                 "optimise_for":       opt_for,
             }
