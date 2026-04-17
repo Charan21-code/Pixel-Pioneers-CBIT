@@ -16,6 +16,7 @@ Only reads from context["df"]. Never queries production_events from the DB.
 import logging
 from datetime import timedelta
 
+import requests
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
@@ -67,13 +68,21 @@ class ForecasterAgent(BaseAgent):
         # ── Step 3: Project next 7 days ──────────────────────────────────────
         forecast_qty = self._project(reg_result, horizon_days=config.SIMULATION["sim_days"])
 
+        # ── Step 3.5: Social Sentiment Monitor ───────────────────────────────
+        sentiment = self._fetch_social_sentiment()
+        viral_demand_shock = sentiment["viral_demand_shock"]
+        trending_product   = sentiment["trending_product"]
+
+        if viral_demand_shock:
+            forecast_qty = int(forecast_qty * config.VIRAL_SHOCK["surge_multiplier"])
+
         # ── Step 4: Anomaly detection ─────────────────────────────────────────
         anomaly_count, anomaly_rows = self._detect_anomalies(df)
 
         # ── Step 5: Heuristic risk label (used as fallback) ───────────────────
         slope = reg_result["slope"]
         heuristic_risk = (
-            "high"   if anomaly_count > 10 or slope > 500 else
+            "high"   if anomaly_count > 10 or slope > 500 or viral_demand_shock else
             "medium" if anomaly_count > 3  or slope > 100 else
             "low"
         )
@@ -89,6 +98,11 @@ class ForecasterAgent(BaseAgent):
         risk_level         = llm_out.get("risk_level",         heuristic_risk)
         summary            = llm_out.get("summary",            self._heuristic_summary(slope, anomaly_count))
         recommended_action = llm_out.get("recommended_action", "Monitor daily demand trends.")
+
+        if viral_demand_shock:
+            risk_level = "high"
+            summary = f"🚨 VIRAL DEMAND SHOCK DETECTED. Trending mentions for '{trending_product}' ({sentiment['mentions']}+). Auto-surging forecast by {config.VIRAL_SHOCK['surge_multiplier']}x."
+            recommended_action = "Enable Demand Surge Protocol immediately."
 
         # ── Step 7: Publish one signal ────────────────────────────────────────
         severity = (
@@ -113,9 +127,32 @@ class ForecasterAgent(BaseAgent):
             "summary":             summary,
             "recommended_action":  recommended_action,
             "horizon_days":        config.SIMULATION["sim_days"],
+            "viral_demand_shock":  viral_demand_shock,
+            "trending_product":    trending_product,
         }
 
     # ── Private helpers ───────────────────────────────────────────────────────
+
+    def _fetch_social_sentiment(self) -> dict:
+        """
+        Optional REST API call for social sentiment scraping.
+        If the endpoint is unavailable, do not fabricate a crisis.
+        """
+        try:
+            resp = requests.get(config.VIRAL_SHOCK["api_url"], timeout=2.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                mentions = data.get("mentions", 0)
+                product = data.get("trending_product", "")
+            else:
+                raise ValueError("Not 200")
+        except Exception:
+            logger.info("[Forecaster] Social sentiment feed unavailable; skipping viral-shock override.")
+            mentions = 0
+            product = ""
+
+        is_viral = mentions >= config.VIRAL_SHOCK["mention_threshold"]
+        return {"viral_demand_shock": is_viral, "trending_product": product, "mentions": mentions}
 
     def _daily_demand(self, df: pd.DataFrame) -> pd.DataFrame:
         """Resample to daily totals of Actual_Order_Qty."""

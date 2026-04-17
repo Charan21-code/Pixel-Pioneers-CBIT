@@ -60,6 +60,16 @@ AGENT = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Viral Demand Shock
+# ─────────────────────────────────────────────────────────────────────────────
+VIRAL_SHOCK = {
+    "api_url": "https://mock-social-api.demo/trends/latest", # Mock REST API endpoint
+    "trending_keywords": ["Galaxy", "Taylor Swift", "Launch"],
+    "surge_multiplier": 10.0,
+    "mention_threshold": 10000,
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Digital Twin (SimPy simulation)
 # ─────────────────────────────────────────────────────────────────────────────
 SIMULATION = {

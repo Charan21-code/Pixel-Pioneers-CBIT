@@ -68,7 +68,11 @@ class SchedulerAgent(BaseAgent):
         if df.empty:
             return self._empty_result("No data available in context.")
 
+        viral_demand_shock = forecast_out.get("viral_demand_shock", False)
         optimise_for = str(context.get("optimise_for", "Time") or "Time").title()
+        if viral_demand_shock:
+            optimise_for = "Surge"
+            
         demand_buffer_pct = float(context.get("demand_buffer_pct", 0.0) or 0.0)
         forecast_qty = int(
             context.get("forecast_qty_override", forecast_out.get("forecast_qty", 0)) or 0
@@ -253,6 +257,7 @@ Respond ONLY with a JSON object using exactly this structure:
             "Time":   [0.38, 0.34, 0.28],
             "Cost":   [0.42, 0.33, 0.25],
             "Carbon": [0.28, 0.27, 0.45],
+            "Surge":  [0.34, 0.33, 0.33],
         }
         shifts = ["AM", "PM", "Night"]
         mix = shift_mix.get(optimise_for, shift_mix["Time"])
@@ -349,6 +354,7 @@ Respond ONLY with a JSON object using exactly this structure:
             "Time": 1.00,
             "Cost": 0.96,
             "Carbon": 0.92,
+            "Surge": 1.00,
         }.get(optimise_for, 1.00)
 
         capacity_rows = []

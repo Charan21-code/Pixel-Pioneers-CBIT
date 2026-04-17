@@ -132,6 +132,8 @@ const PAGE_TITLES = {
   '/hitl':       'HITL Inbox',
 }
 
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
 function AppInner() {
   const location = useLocation()
   const [systemStatus, setSystemStatus] = useState({ final_status: 'UNKNOWN', system_health: 0, last_run_at: null })
@@ -139,15 +141,18 @@ function AppInner() {
   const [running,      setRunning]      = useState(false)
 
   const fetchStatus = useCallback(async () => {
+    let statusData = null
     try {
       const s = await api.getSystemStatus()
       setSystemStatus(s)
       setRunning(s.is_running || false)
+      statusData = s
     } catch (_) {}
     try {
       const c = await api.getHitlCounts()
       setHitlCount(c.total || 0)
     } catch (_) {}
+    return statusData
   }, [])
 
   useEffect(() => {
@@ -160,12 +165,23 @@ function AppInner() {
     if (running) return
     setRunning(true)
     try {
-      await api.runOrchestratorSync()
-      await fetchStatus()
+      await api.triggerOrchestrator()
     } catch (e) {
-      console.error('Orchestrator run failed:', e)
+      if (!String(e?.message || '').toLowerCase().includes('already running')) {
+        console.error('Orchestrator trigger failed:', e)
+      }
+    }
+
+    try {
+      for (let i = 0; i < 45; i++) {
+        const status = await fetchStatus()
+        if (i > 0 && status && !status.is_running) break
+        await wait(1000)
+      }
+    } catch (e) {
+      console.error('Status polling failed:', e)
     } finally {
-      setRunning(false)
+      await fetchStatus()
     }
   }
 

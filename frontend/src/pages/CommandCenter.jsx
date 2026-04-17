@@ -145,6 +145,12 @@ export default function CommandCenter({ onRunAgents, running }) {
 
   return (
     <div>
+      {(running || data?.is_running) && (
+        <div className="info-box" style={{ marginBottom:16 }}>
+          ⏳ Agents are currently running. Metrics will refresh automatically when the cycle completes.
+        </div>
+      )}
+
       {/* Status Banner */}
       <div className={`status-banner ${STATUS_CLASS[status] || 'unknown'}`}>
         <span style={{ flex:1 }}>{STATUS_LABEL[status] || STATUS_LABEL.UNKNOWN}</span>
@@ -222,7 +228,7 @@ export default function CommandCenter({ onRunAgents, running }) {
         <AgentCard name="Buyer"           icon="📦" accentKey="buyer"     summary={`${agents.buyer?.reorders_triggered || 0} reorder(s) triggered`} metric={`$${(agents.buyer?.total_spend_usd || 0).toLocaleString(undefined,{maximumFractionDigits:0})} requested`} />
         <AgentCard name="Environmentalist" icon="🌱" accentKey="environ"  summary={agents.environ?.summary}  metric={`Peak penalty: ${agents.environ?.peak_penalty_pct?.toFixed(1) || 0}% | ${agents.environ?.compliance_flag ? '✅ Compliant' : '⚠️ Non-Compliant'}`} />
         <AgentCard name="Finance"         icon="💰" accentKey="finance"   summary={`Health: ${agents.finance?.health_score?.toFixed(1) || '—'}/100 | Gate: ${agents.finance?.gate_decision || '—'}`} metric={`$${(agents.finance?.spent_usd || 0).toLocaleString(undefined,{maximumFractionDigits:0})} spent`} />
-        <AgentCard name="Scheduler"       icon="🗓️" accentKey="scheduler" summary={`${agents.scheduler?.plant_count || 0} plant plans generated`} metric={`System: ${agents.scheduler?.final_status || '—'}`} />
+        <AgentCard name="Scheduler"       icon="🗓️" accentKey="scheduler" summary={`${agents.scheduler?.plant_count || 0} plant plans generated`} metric={`Avg Utilisation: ${agents.scheduler?.avg_utilisation?.toFixed?.(1) ?? agents.scheduler?.avg_utilisation ?? 0}% | Throughput: ${(agents.scheduler?.total_throughput || 0).toLocaleString()}`} />
       </div>
 
       {/* Conflicts */}

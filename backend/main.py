@@ -36,6 +36,8 @@ from nlp.control_center import (
     heuristic_intent,
     build_query_answer,
     select_hitl_item,
+    ask_ollama_intent,
+    merge_intents,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -168,6 +170,27 @@ def _load_df() -> pd.DataFrame:
 def _get_orch_output() -> dict:
     """Return cached orchestrator output or empty dict."""
     return _CACHE.get("orch_output") or {}
+
+
+def _recent_agent_log(limit: int = 8) -> list[dict]:
+    """Return a compact recent agent-event snapshot for NLP prompting."""
+    try:
+        import sqlite3
+        conn = sqlite3.connect(config.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT logged_at, agent_name, severity, facility_id, message
+            FROM agent_events
+            ORDER BY logged_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
 
 
 def _run_orchestrator_sync() -> dict:
@@ -429,6 +452,8 @@ def get_inventory():
         "total_spend_requested":  buyer_out.get("total_spend_requested_usd", 0.0),
         "reorders_triggered":     buyer_out.get("reorders_triggered", 0),
         "facilities_checked":     buyer_out.get("facilities_checked", 0),
+        "summary":                buyer_out.get("summary", ""),
+        "narrative":              buyer_out.get("narrative", ""),
         "inv_time_series":        inv_series,
         "quote_time_series":      quotes,
     })
@@ -570,12 +595,22 @@ def get_finance():
     except Exception:
         monthly_spend = []
 
+    alerts = []
+    if finance.get("gate_decision") == "BLOCKED":
+        alerts.append("Finance gate is currently BLOCKED.")
+    if finance.get("budget_status", {}).get("over_budget"):
+        alerts.append("Monthly operating spend is above the configured budget threshold.")
+    if finance.get("risk_score", 0) >= 70:
+        alerts.append("Financial risk score is elevated and needs review.")
+
     return _json_safe({
         "health_score":   finance.get("health_score", 100.0),
         "gate_decision":  finance.get("gate_decision", "APPROVED"),
         "risk_score":     finance.get("risk_score", 0),
         "budget_status":  finance.get("budget_status", {}),
-        "alerts":         finance.get("alerts", []),
+        "alerts":         finance.get("alerts", []) or alerts,
+        "summary":        finance.get("summary", ""),
+        "suggestions":    finance.get("suggestions", []),
         "penalty_series": penalties,
         "cost_series":    costs,
         "monthly_spend":  monthly_spend,
@@ -727,14 +762,25 @@ def process_nlp_query(req: NlpQueryRequest):
     pending_counts = HitlManager().get_counts()
 
     # Parse intent
-    intent_data = heuristic_intent(req.query, plants, req.selected_plant)
+    heuristic = heuristic_intent(req.query, plants, req.selected_plant)
+    llm_parsed = ask_ollama_intent(
+        req.query,
+        out,
+        pending_items,
+        pending_counts,
+        selected_plant=req.selected_plant,
+        recent_logs=_recent_agent_log(),
+    )
+    intent_data = merge_intents(heuristic, llm_parsed)
 
     # Build deterministic answer
-    answer, agent_name = build_query_answer(
+    fallback_answer, fallback_agent = build_query_answer(
         req.query, out, df,
         pending_counts=pending_counts,
         selected_plant=req.selected_plant,
     )
+    answer = intent_data.get("response") or fallback_answer
+    agent_name = intent_data.get("agent") or fallback_agent
 
     # Handle actionable intents
     action_result = None
@@ -776,6 +822,7 @@ def process_nlp_query(req: NlpQueryRequest):
         "params":          params,
         "response":        answer,
         "action_result":   action_result,
+        "action":          intent_data.get("action", ""),
         "timestamp":       datetime.utcnow().isoformat(),
     })
 
@@ -883,7 +930,16 @@ def get_command_center():
             },
             "scheduler": {
                 "plant_count":  len(out.get("scheduler", {})),
-                "final_status": out.get("final_status", "UNKNOWN"),
+                "ready_count":  len([p for p in out.get("scheduler", {}).values() if p.get("shift_plan")]),
+                "avg_utilisation": round(
+                    float(np.mean([p.get("utilisation_pct", 0) for p in out.get("scheduler", {}).values()]))
+                    if out.get("scheduler") else 0.0,
+                    1,
+                ),
+                "total_throughput": int(sum(
+                    p.get("expected_throughput", 0)
+                    for p in out.get("scheduler", {}).values()
+                )),
             },
         },
     })

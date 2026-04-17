@@ -11,7 +11,10 @@ import json
 import re
 from typing import Iterable, Optional
 
+import httpx
 import pandas as pd
+
+import config
 
 
 def _norm(value: str) -> str:
@@ -233,6 +236,149 @@ def heuristic_intent(query: str, plants: Iterable[str], selected_plant: str | No
     }
 
 
+def build_context_payload(
+    out: dict,
+    pending_items: list[dict],
+    pending_counts: dict,
+    selected_plant: str | None = None,
+    recent_logs: Optional[list[dict]] = None,
+) -> dict:
+    """Compact orchestrator snapshot for Ollama-guided NLP routing."""
+    finance = out.get("finance", {})
+    budget = finance.get("budget_status", {})
+    mechanic = out.get("mechanic", {})
+    buyer_inventory = out.get("buyer_inventory", {})
+    inventory_watch = sorted(
+        [
+            {
+                "plant": plant,
+                "days_remaining": values.get("days_remaining", 0),
+                "lead_days": values.get("lead_days", 0),
+                "status": values.get("status", "unknown"),
+            }
+            for plant, values in buyer_inventory.items()
+        ],
+        key=lambda row: row["days_remaining"],
+    )[:3]
+
+    return {
+        "selected_plant": selected_plant,
+        "final_status": out.get("final_status", "UNKNOWN"),
+        "system_health": out.get("system_health", 0),
+        "forecast": {
+            "forecast_qty": out.get("forecast", {}).get("forecast_qty", 0),
+            "trend_slope": out.get("forecast", {}).get("trend_slope", 0),
+            "risk_level": out.get("forecast", {}).get("risk_level", "unknown"),
+            "anomaly_count": out.get("forecast", {}).get("anomaly_count", 0),
+        },
+        "mechanic": {
+            "critical_facilities": mechanic.get("critical_facilities", []),
+            "warning_facilities": mechanic.get("warning_facilities", []),
+        },
+        "inventory_watch": inventory_watch,
+        "finance": {
+            "gate_decision": finance.get("gate_decision", "UNKNOWN"),
+            "budget_used_pct": budget.get("pct_used", 0),
+            "remaining_usd": budget.get("remaining_usd", 0),
+            "risk_score": finance.get("risk_score", 0),
+        },
+        "conflicts": out.get("conflicts", [])[:5],
+        "pending_hitl_counts": pending_counts,
+        "pending_hitl_items": [
+            {
+                "id": item.get("id"),
+                "item_type": item.get("item_type"),
+                "source": item.get("source"),
+                "payload": item.get("payload", {}),
+            }
+            for item in pending_items[:5]
+        ],
+        "recent_agent_log": recent_logs or [],
+    }
+
+
+def ask_ollama_intent(
+    query: str,
+    out: dict,
+    pending_items: list[dict],
+    pending_counts: dict,
+    selected_plant: str | None = None,
+    recent_logs: Optional[list[dict]] = None,
+) -> dict:
+    """Ask Ollama for intent and answer enrichment. Returns {} on failure."""
+    prompt = f"""You are the Orchestrator agent for a global electronics factory.
+
+Current system state:
+{json.dumps(build_context_payload(out, pending_items, pending_counts, selected_plant, recent_logs), indent=2, default=str)}
+
+The user said:
+{query}
+
+Respond ONLY with valid JSON matching this schema:
+{{
+  "intent": "query | simulate | reconfigure | escalate | approve | reject",
+  "agent": "which agent handles this",
+  "confidence_pct": 0-100,
+  "params": {{
+    "plant": "optional plant name",
+    "item_type": "optional ops|procurement|finance|maintenance|carbon",
+    "item_id": "optional integer id",
+    "workforce_pct": "optional number",
+    "oee_pct": "optional number",
+    "forecast_qty": "optional integer",
+    "energy_price": "optional number",
+    "downtime_hrs": "optional number",
+    "horizon_days": "optional integer",
+    "optimise_for": "optional Time|Cost|Carbon",
+    "demand_buffer_pct": "optional number",
+    "comment": "optional comment for approve/reject"
+  }},
+  "response": "plain English answer to show the user",
+  "action": "single sentence describing the system action"
+}}"""
+    try:
+        response = httpx.post(
+            config.OLLAMA_URL,
+            json={
+                "model": config.OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+            },
+            timeout=config.OLLAMA_TIMEOUT,
+        )
+        return coerce_json_object(response.json().get("response", ""))
+    except Exception:
+        return {}
+
+
+def merge_intents(heuristic: dict, llm: dict) -> dict:
+    """Overlay valid LLM fields on top of deterministic intent parsing."""
+    merged = {
+        "intent": heuristic.get("intent", "query"),
+        "agent": heuristic.get("agent", "Orchestrator Agent"),
+        "confidence_pct": heuristic.get("confidence_pct", 60),
+        "params": dict(heuristic.get("params", {})),
+        "response": heuristic.get("response", ""),
+        "action": heuristic.get("action", ""),
+    }
+
+    if llm.get("intent") in {"query", "simulate", "reconfigure", "escalate", "approve", "reject"}:
+        merged["intent"] = llm["intent"]
+    if llm.get("agent"):
+        merged["agent"] = str(llm["agent"]).strip()
+    if isinstance(llm.get("confidence_pct"), (int, float)):
+        merged["confidence_pct"] = max(0, min(100, float(llm["confidence_pct"])))
+    if isinstance(llm.get("params"), dict):
+        for key, value in llm["params"].items():
+            if value not in (None, "", []):
+                merged["params"][key] = value
+    if llm.get("response"):
+        merged["response"] = str(llm["response"]).strip()
+    if llm.get("action"):
+        merged["action"] = str(llm["action"]).strip()
+    return merged
+
+
 def select_hitl_item(
     query: str,
     pending_items: list[dict],
@@ -302,6 +448,25 @@ def build_query_answer(
     lower = query.lower()
     plants = out.get("plants", [])
     plant = find_plant_mention(query, plants) or selected_plant
+
+    if any(token in lower for token in ("hello", "hi", "hey", "help")):
+        return (
+            "OPS//CORE is online. You can ask about system health, conflicts, inventory, finance, maintenance, carbon, or any specific plant.",
+            "Orchestrator Agent",
+        )
+
+    if any(token in lower for token in ("conflict", "conflicts", "blocked issue", "blocking issue", "what's blocking", "what is blocking")):
+        conflicts = out.get("conflicts", [])
+        if not conflicts:
+            return "There are no active cross-agent conflicts right now.", "Orchestrator Agent"
+        top = conflicts[:3]
+        summary = "; ".join(
+            f"{c.get('severity', 'UNKNOWN')}: {c.get('description', '')}"
+            for c in top
+        )
+        if len(conflicts) > len(top):
+            summary += f"; plus {len(conflicts) - len(top)} more."
+        return summary, "Orchestrator Agent"
 
     if any(token in lower for token in ("approval", "hitl", "pending")) and pending_counts:
         total = pending_counts.get("total", 0)

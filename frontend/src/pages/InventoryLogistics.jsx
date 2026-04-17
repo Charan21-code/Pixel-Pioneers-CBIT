@@ -104,6 +104,7 @@ export default function InventoryLogistics() {
   const inv      = data?.buyer_inventory || {}
   const reorders = data?.reorders        || []
   const rawQuotes = data?.quote_time_series || []
+  const summary  = data?.summary || data?.narrative || ''
   const plants   = Object.keys(inv)
 
   // Downsample daily quotes → weekly averages to eliminate chart noise
@@ -165,6 +166,12 @@ export default function InventoryLogistics() {
           <div className="kpi-delta">requested this cycle</div>
         </div>
       </div>
+
+      {summary && (
+        <div className="info-box" style={{ marginBottom:20 }}>
+          📦 <b>Buyer Agent:</b> {summary}
+        </div>
+      )}
 
       {/* Inventory by plant bar chart */}
       {barData.length > 0 && (

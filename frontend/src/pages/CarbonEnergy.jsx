@@ -92,7 +92,7 @@ export default function CarbonEnergy() {
         <div className="chart-container">
           <div className="chart-title"><Zap size={14} /> Daily Energy Consumption (kWh)</div>
             <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={ts} margin={{ top:10, right:20, left:10, bottom:30 }}>
+              <AreaChart data={energySeries} margin={{ top:10, right:20, left:10, bottom:30 }}>
                 <defs>
                   <linearGradient id="nrgGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%"  stopColor="#FFB300" stopOpacity={0.35} />
@@ -151,9 +151,9 @@ export default function CarbonEnergy() {
           <div className="card-header"><div className="card-title">💡 Shift Scheduling Suggestions</div></div>
           {suggestions.map((s, i) => (
             <div key={i} className="stat-row">
-              <span className="stat-row-label">{s.facility || `Suggestion ${i+1}`}</span>
+              <span className="stat-row-label">{typeof s === 'string' ? `Suggestion ${i+1}` : s.facility || `Suggestion ${i+1}`}</span>
               <span className="stat-row-value" style={{ color:'var(--cyan)', fontSize:12 }}>
-                {s.current_shift || s.message || JSON.stringify(s)}
+                {typeof s === 'string' ? s : s.current_shift || s.message || JSON.stringify(s)}
               </span>
             </div>
           ))}

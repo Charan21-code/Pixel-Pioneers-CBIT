@@ -427,6 +427,18 @@ class OrchestratorAgent(BaseAgent):
                 "action":          "Production plan approval blocked until CFO review.",
             })
 
+        # Rule 6: Viral Demand Shock Alert
+        if forecast.get("viral_demand_shock") == True:
+            trending = forecast.get("trending_product", "Unknown Product")
+            conflicts.append({
+                "type":            "viral_demand_shock_alert",
+                "description":     f"VIRAL DEMAND SHOCK: Rapid social sentiment spike detected for '{trending}'.",
+                "severity":        "CRITICAL",
+                "involved_agents": ["Forecaster", "Scheduler"],
+                "plant":           "All",
+                "action":          "Demand Surge Protocol automatically enabled. HITL notification triggered.",
+            })
+
         return conflicts
 
     # ── Final status ──────────────────────────────────────────────────────────

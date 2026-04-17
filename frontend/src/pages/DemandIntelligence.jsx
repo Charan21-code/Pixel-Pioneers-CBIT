@@ -83,29 +83,95 @@ export default function DemandIntelligence() {
         </div>
       )}
 
-      {/* Demand Time Series */}
-      <div className="chart-container">
-        <div className="chart-title"><TrendingUp size={15} /> Daily Demand Volume — All Facilities</div>
-        <ResponsiveContainer width="100%" height={300}>
-          <AreaChart data={ts} margin={{ top:10, right:20, left:10, bottom:30 }}>
-            <defs>
-              <linearGradient id="demGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor="#00E5FF" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#00E5FF" stopOpacity={0}   />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.8} />
-            <XAxis dataKey="date" tick={{ fontSize:10, fill:'var(--text-muted)', fontFamily:'monospace' }} tickLine={false} interval="preserveStartEnd" angle={-30} textAnchor="end" height={45} />
-            <YAxis tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} axisLine={false} width={72} tickFormatter={v => v.toLocaleString()} />
-            <Tooltip
-              contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }}
-              labelStyle={{ color:'var(--text-secondary)' }}
-              formatter={v => [v.toLocaleString(), 'Units']}
-            />
-            <Area type="monotone" dataKey="qty" stroke="#00E5FF" strokeWidth={2} fill="url(#demGrad)" dot={false} animationDuration={600} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+      {/* Demand Time Series — aggregated to weekly to reduce noise */}
+      {(() => {
+        // Aggregate daily data into weekly buckets
+        const weekMap = {}
+        ;[...ts].sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(({ date, qty }) => {
+          const d = new Date(date)
+          // Week key: ISO week start (Monday)
+          const day = d.getDay()
+          const diff = (day === 0 ? -6 : 1) - day
+          const weekStart = new Date(d)
+          weekStart.setDate(d.getDate() + diff)
+          const key = weekStart.toISOString().slice(0, 10)
+          if (!weekMap[key]) weekMap[key] = { date: key, total: 0, count: 0 }
+          weekMap[key].total += qty
+          weekMap[key].count += 1
+        })
+        const weekly = Object.values(weekMap)
+          .sort((a, b) => new Date(a.date) - new Date(b.date))
+          .map(w => ({ date: w.date, qty: Math.round(w.total / w.count) }))
+
+        // Compute 4-week moving average for trend overlay
+        const maWindow = 4
+        const weeklyWithMA = weekly.map((row, i) => {
+          if (i < maWindow - 1) return { ...row, ma: null }
+          const slice = weekly.slice(i - maWindow + 1, i + 1)
+          const avg = Math.round(slice.reduce((s, r) => s + r.qty, 0) / maWindow)
+          return { ...row, ma: avg }
+        })
+
+        // Show ~14 evenly-spaced x-axis ticks
+        const tickInterval = Math.max(1, Math.floor(weeklyWithMA.length / 14))
+
+        return (
+          <div className="chart-container">
+            <div className="chart-title"><TrendingUp size={15} /> Weekly Avg Demand Volume — All Facilities</div>
+            <ResponsiveContainer width="100%" height={300}>
+              <AreaChart data={weeklyWithMA} margin={{ top:10, right:20, left:10, bottom:30 }}>
+                <defs>
+                  <linearGradient id="demGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#00E5FF" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#00E5FF" stopOpacity={0}    />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.6} />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize:10, fill:'var(--text-muted)', fontFamily:'monospace' }}
+                  tickLine={false}
+                  interval={tickInterval}
+                  angle={-30}
+                  textAnchor="end"
+                  height={45}
+                />
+                <YAxis
+                  tick={{ fontSize:10, fill:'var(--text-muted)' }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={72}
+                  tickFormatter={v => v.toLocaleString()}
+                />
+                <Tooltip
+                  contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }}
+                  labelStyle={{ color:'var(--text-secondary)' }}
+                  formatter={(v, name) => [v?.toLocaleString(), name === 'qty' ? 'Weekly Avg Units' : '4-Wk Trend']}
+                />
+                <Area
+                  type="basis"
+                  dataKey="qty"
+                  stroke="#00E5FF"
+                  strokeWidth={2}
+                  fill="url(#demGrad)"
+                  dot={false}
+                  animationDuration={600}
+                />
+                <Line
+                  type="basis"
+                  dataKey="ma"
+                  stroke="#FFB300"
+                  strokeWidth={2}
+                  dot={false}
+                  strokeDasharray="6 3"
+                  connectNulls
+                  animationDuration={600}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )
+      })()}
 
       {/* Per-Facility Breakdown */}
       {data?.plant_series && Object.keys(data.plant_series).length > 0 && (() => {

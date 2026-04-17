@@ -31,6 +31,8 @@ export default function FinanceDashboard() {
   const penalties  = data?.penalty_series || []
   const costs      = data?.cost_series    || []
   const monthly    = data?.monthly_spend  || []
+  const summary    = data?.summary || ''
+  const suggestions = data?.suggestions || []
 
   const healthColor = health >= 70 ? 'var(--green)' : health >= 40 ? 'var(--amber)' : 'var(--red)'
   const gateColor   = gate === 'APPROVED' || gate === 'AUTO_APPROVE' ? 'var(--green)' : gate === 'HITL_REQUIRED' ? 'var(--red)' : 'var(--amber)'
@@ -56,6 +58,12 @@ export default function FinanceDashboard() {
       {alerts.length > 0 && (
         <div className="warn-box">
           {alerts.slice(0,3).map((a,i) => <div key={i}>⚠️ {typeof a === 'string' ? a : a.message || JSON.stringify(a)}</div>)}
+        </div>
+      )}
+
+      {summary && (
+        <div className="info-box" style={{ marginBottom:20 }}>
+          💰 <b>FinanceAgent:</b> {summary}
         </div>
       )}
 
@@ -186,6 +194,19 @@ export default function FinanceDashboard() {
           )}
         </div>
       </div>
+
+      {suggestions.length > 0 && (
+        <div className="card">
+          <div className="card-header"><div className="card-title">💡 Finance Suggestions</div></div>
+          {suggestions.map((s, i) => (
+            <div key={i} className="stat-row">
+              <span className="stat-row-label" style={{ fontSize:12, lineHeight:1.5 }}>
+                {typeof s === 'string' ? s : JSON.stringify(s)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

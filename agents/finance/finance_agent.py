@@ -157,13 +157,14 @@ class FinanceAgent(BaseAgent):
             summary              str   — Ollama financial narrative
         """
         df: pd.DataFrame = context.get("df", pd.DataFrame())
+        as_of_time = context.get("as_of_time")
         buyer_out   = context.get("buyer",   {})
         forecast    = context.get("forecast", {})
         mechanic    = context.get("mechanic", {})
         environ     = context.get("environ",  {})
 
         approved_spend_status = self.budget_tracker.get_status()
-        budget_status         = self._derive_live_budget_status(df)
+        budget_status         = self._derive_live_budget_status(df, as_of_time=as_of_time)
         monthly_budget        = config.FINANCE["monthly_budget"]
         spent_usd             = budget_status.get("spent_usd", 0.0)
         remaining_usd         = budget_status.get("remaining_usd", monthly_budget)
@@ -234,9 +235,13 @@ class FinanceAgent(BaseAgent):
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    def _derive_live_budget_status(self, df: pd.DataFrame) -> dict:
+    def _derive_live_budget_status(
+        self,
+        df: pd.DataFrame,
+        as_of_time: pd.Timestamp | None = None,
+    ) -> dict:
         """
-        Estimate live operating spend from the current data window.
+        Estimate live operating spend for the active month only.
 
         The dataset is recorded at a 2-hour cadence, so labour is valued per
         event at 2 hours rather than a full 8-hour shift to avoid inflating
@@ -248,9 +253,17 @@ class FinanceAgent(BaseAgent):
 
         if not df.empty:
             try:
-                procurement_usd = float(df.get("Live_Supplier_Quote_USD", pd.Series(dtype=float)).sum())
-                carbon_usd      = float(df.get("Carbon_Cost_Penalty_USD", pd.Series(dtype=float)).sum())
-                workforce_total = float(df.get("Workforce_Deployed", pd.Series(dtype=float)).sum())
+                work_df = df.copy()
+                if "Timestamp" in work_df.columns:
+                    ts = pd.to_datetime(work_df["Timestamp"], errors="coerce")
+                    ref_ts = pd.Timestamp(as_of_time) if as_of_time is not None else ts.max()
+                    if pd.notna(ref_ts):
+                        month_start = ref_ts.to_period("M").to_timestamp()
+                        month_end = month_start + pd.offsets.MonthBegin(1)
+                        work_df = work_df[(ts >= month_start) & (ts < month_end)].copy()
+                procurement_usd = float(work_df.get("Live_Supplier_Quote_USD", pd.Series(dtype=float)).sum())
+                carbon_usd      = float(work_df.get("Carbon_Cost_Penalty_USD", pd.Series(dtype=float)).sum())
+                workforce_total = float(work_df.get("Workforce_Deployed", pd.Series(dtype=float)).sum())
                 labour_usd      = workforce_total * _EVENT_DURATION_HOURS * _LABOUR_RATE_USD_PER_HOUR
             except Exception as exc:
                 logger.warning("[FinanceAgent] Live spend derivation failed: %s", exc)
@@ -266,6 +279,7 @@ class FinanceAgent(BaseAgent):
             "remaining_usd":   round(remaining_usd, 2),
             "pct_used":        round(pct_used, 2),
             "over_budget":     remaining_usd < 0,
+            "monthly_budget":  config.FINANCE["monthly_budget"],
             "procurement_usd": round(procurement_usd, 2),
             "carbon_usd":      round(carbon_usd, 2),
             "labour_usd":      round(labour_usd, 2),
