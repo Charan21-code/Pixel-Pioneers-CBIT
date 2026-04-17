@@ -7,10 +7,12 @@ consumed by the React frontend.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Optional
 
@@ -39,11 +41,60 @@ from nlp.control_center import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ── Always-on agent loop ──────────────────────────────────────────────────────
+
+async def _agent_loop():
+    """
+    Background coroutine — started automatically on server startup.
+
+    Runs the full orchestrator pipeline:
+      • immediately after the server is ready (startup_delay_secs)
+      • then again every interval_secs (default: 5 minutes)
+
+    Uses run_in_executor so the heavy CPU/IO work happens in a thread pool
+    and the uvicorn event loop (and all API endpoints) stay fully responsive
+    while agents are computing.
+    """
+    delay    = config.AGENT_LOOP["startup_delay_secs"]
+    interval = config.AGENT_LOOP["interval_secs"]
+
+    await asyncio.sleep(delay)   # let uvicorn finish binding its port
+    loop = asyncio.get_event_loop()
+
+    logger.info("[AgentLoop] Always-on loop started. Interval: %ds.", interval)
+    while True:
+        logger.info("[AgentLoop] Starting orchestrator run...")
+        try:
+            await loop.run_in_executor(None, _run_orchestrator_sync)
+        except Exception as exc:
+            logger.error("[AgentLoop] Orchestrator run raised an exception: %s", exc, exc_info=True)
+        logger.info("[AgentLoop] Run complete. Next run in %ds.", interval)
+        await asyncio.sleep(interval)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: pre-load data and start the always-on agent loop."""
+    logger.info("[Startup] Pre-loading data.csv into cache...")
+    _load_df()   # warm the CSV cache so the first API call is instant
+
+    task = asyncio.create_task(_agent_loop())
+    logger.info("[Startup] Always-on agent loop scheduled.")
+    yield
+    # ── shutdown ──────────────────────────────────────────────────────────────
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        logger.info("[Shutdown] Agent loop cancelled cleanly.")
+
+
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="OPS//CORE Tactical Command API",
     description="Agentic Production Planning System — FastAPI Backend",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

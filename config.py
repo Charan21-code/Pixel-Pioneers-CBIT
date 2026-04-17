@@ -102,3 +102,11 @@ DASHBOARD = {
     "ollama_check_ttl_secs": 30,  # how often to re-ping Ollama for status
     "agent_log_display":    50,   # max rows shown in the agent activity log
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Always-On Agent Loop
+# ─────────────────────────────────────────────────────────────────────────────
+AGENT_LOOP = {
+    "interval_secs":      300,   # re-run all agents every 5 minutes
+    "startup_delay_secs":   2,   # brief pause after uvicorn binds its port
+}

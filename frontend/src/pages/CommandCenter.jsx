@@ -10,7 +10,7 @@ const STATUS_LABEL = {
   ALL_OK:     '🟢 ALL SYSTEMS GO — All agents operating within approved parameters',
   NEEDS_HITL: '🟡 ATTENTION NEEDED — Issues require human review',
   BLOCKED:    '🔴 PRODUCTION BLOCKED — Critical conflicts. HITL review required',
-  UNKNOWN:    '⚪ Awaiting first agent run — click Run All Agents',
+  UNKNOWN:    '⏳ Agents initializing — first run in progress, data will appear shortly...',
 }
 
 const AGENT_ACCENT = {
