@@ -1,6 +1,6 @@
 """
 pages/06_Finance_Dashboard.py — Finance Dashboard (Finance Agent)
-Phase 3: Full implementation.
+Phase 4: budget gauge, gate decision, risk score, and actionable suggestions.
   - Budget circular gauge + 3-column KPI row
   - Finance Gate Status block (with proposed cost + overhead breakdown)
   - Weekly cost breakdown stacked bar chart (Procurement + Carbon + Labour)
@@ -34,12 +34,36 @@ PLOT_THEME = dict(
     font_color="#EEE",
 )
 
+LABOUR_RATE_USD_PER_HOUR = 15.0
+EVENT_DURATION_HOURS = 2.0
+
 df           = st.session_state.get("_df", pd.DataFrame())
 current_time = st.session_state.get("_current_time", pd.Timestamp.now())
 
 
 def orch() -> dict:
     return st.session_state.get("orch_output") or {}
+
+
+def live_budget_status_from_df(frame: pd.DataFrame) -> dict:
+    procurement = float(frame["Live_Supplier_Quote_USD"].sum()) if "Live_Supplier_Quote_USD" in frame.columns else 0.0
+    carbon      = float(frame["Carbon_Cost_Penalty_USD"].sum()) if "Carbon_Cost_Penalty_USD" in frame.columns else 0.0
+    labour      = (
+        float(frame["Workforce_Deployed"].sum()) * EVENT_DURATION_HOURS * LABOUR_RATE_USD_PER_HOUR
+        if "Workforce_Deployed" in frame.columns else 0.0
+    )
+    spent       = procurement + carbon + labour
+    remaining   = config.FINANCE["monthly_budget"] - spent
+    pct_used    = (spent / config.FINANCE["monthly_budget"] * 100) if config.FINANCE["monthly_budget"] > 0 else 0.0
+    return {
+        "spent_usd": round(spent, 2),
+        "remaining_usd": round(remaining, 2),
+        "pct_used": round(pct_used, 2),
+        "over_budget": remaining < 0,
+        "procurement_usd": round(procurement, 2),
+        "carbon_usd": round(carbon, 2),
+        "labour_usd": round(labour, 2),
+    }
 
 
 # ── Page header ───────────────────────────────────────────────────────────────
@@ -55,24 +79,31 @@ finance_out = out.get("finance", {})
 
 # ── Derive core financial numbers ─────────────────────────────────────────────
 monthly_budget    = config.FINANCE["monthly_budget"]
-budget_status     = finance_out.get("budget_status", {})
+budget_status     = finance_out.get("budget_status") or live_budget_status_from_df(df)
+approved_status   = finance_out.get("approved_spend_status", {})
 
-# Fall back to computing from df if agents haven't run yet
-spent_usd = budget_status.get("spent_usd")
-if spent_usd is None:
-    try:
-        spent_usd = float(df["Live_Supplier_Quote_USD"].sum() + df["Carbon_Cost_Penalty_USD"].sum())
-    except Exception:
-        spent_usd = 0.0
-
-remaining_usd     = monthly_budget - spent_usd
-pct_used          = min(100.0, (spent_usd / monthly_budget * 100)) if monthly_budget > 0 else 0.0
-health_score      = finance_out.get("health_score",      max(0, 100 - pct_used))
-risk_score        = finance_out.get("risk_score",         0.0)
-gate_decision     = finance_out.get("gate_decision",      "APPROVED")
-proposed_cost     = finance_out.get("proposed_plan_cost", 0.0)
-overhead_cost     = proposed_cost * config.FINANCE["overhead_multiplier"]
-total_if_approved = spent_usd + overhead_cost
+spent_usd         = float(budget_status.get("spent_usd", 0.0))
+remaining_usd     = float(budget_status.get("remaining_usd", monthly_budget - spent_usd))
+pct_used          = float(budget_status.get("pct_used", 0.0))
+procurement_usd   = float(budget_status.get("procurement_usd", 0.0))
+carbon_usd        = float(budget_status.get("carbon_usd", 0.0))
+labour_usd        = float(budget_status.get("labour_usd", 0.0))
+health_score      = finance_out.get("health_score", max(0, min(100, 100 - pct_used)))
+risk_score        = finance_out.get("risk_score", 0.0)
+gate_decision     = finance_out.get("gate_decision", "APPROVED")
+proposed_cost     = float(finance_out.get("proposed_plan_cost", 0.0))
+overhead_only     = float(
+    finance_out.get(
+        "proposed_overhead_usd",
+        proposed_cost * (config.FINANCE["overhead_multiplier"] - 1),
+    )
+)
+total_if_approved = float(
+    finance_out.get(
+        "projected_total_usd",
+        spent_usd + proposed_cost * config.FINANCE["overhead_multiplier"],
+    )
+)
 gate_ok           = gate_decision == "APPROVED"
 
 # ── Section 1: Budget Gauge + KPIs ─────────────────────────────────────────────
@@ -83,10 +114,11 @@ gauge_color = (
     COLORS["warning"]  if pct_used > 70 else
     COLORS["healthy"]
 )
+gauge_value = min(100.0, max(0.0, pct_used))
 
 fig_gauge = go.Figure(go.Indicator(
     mode="gauge+number+delta",
-    value=pct_used,
+    value=gauge_value,
     number={"suffix": "%", "font": {"size": 40, "color": gauge_color}},
     delta={
         "reference": 70,
@@ -123,10 +155,14 @@ with col_gauge:
 
 with col_kpi1:
     st.metric("💰 Total Budget",    f"${monthly_budget:,.0f}")
-    st.metric("📤 Spent (MTD)",     f"${spent_usd:,.0f}",
+    st.metric("📤 Spent (Live Window)", f"${spent_usd:,.0f}",
               delta=f"{pct_used:.1f}% used")
     st.metric("💵 Remaining",       f"${remaining_usd:,.0f}",
               delta=f"{100 - pct_used:.1f}% left")
+    st.caption(
+        f"Basis: Procurement ${procurement_usd:,.0f} + Carbon ${carbon_usd:,.0f} + "
+        f"Labour ${labour_usd:,.0f} (2h/event cadence)"
+    )
 
 with col_kpi2:
     st.metric("🏥 Finance Health",  f"{health_score:.1f} / 100")
@@ -138,6 +174,11 @@ with col_kpi2:
         f"color:{gate_color};'>Finance Gate: {gate_label}</div>",
         unsafe_allow_html=True,
     )
+    if approved_status:
+        st.caption(
+            f"Approved PO ledger: ${approved_status.get('spent_usd', 0):,.0f} committed "
+            f"via Finance clearances."
+        )
 
 st.markdown("---")
 
@@ -160,7 +201,7 @@ This month's spend:
 Proposed plan cost:
 <b>${proposed_cost:,.0f}</b><br/>
 Overhead ({int((config.FINANCE['overhead_multiplier']-1)*100)}%):
-<b>+ ${overhead_cost - proposed_cost:,.0f}</b><br/>
+<b>+ ${overhead_only:,.0f}</b><br/>
 Total if approved:
 <b>${total_if_approved:,.0f}</b>
 &nbsp;(Remaining: <b style="color:{gate_c};">${remaining_after:,.0f}</b>)<br/>
@@ -173,18 +214,17 @@ Decision: <b style="color:{gate_c};">{gate_icon} — {gate_reason}</b>
 # ── Section 3: Cost Breakdown Chart ──────────────────────────────────────────
 st.subheader("📊 Cost Breakdown Over Time")
 
-df["_week"] = df["Timestamp"].dt.to_period("W").astype(str)
-weekly      = df.groupby("_week").agg(
+cost_df = df.copy()
+cost_df["_week"] = cost_df["Timestamp"].dt.to_period("W").astype(str)
+weekly      = cost_df.groupby("_week").agg(
     procurement=("Live_Supplier_Quote_USD",  "sum"),
     carbon=     ("Carbon_Cost_Penalty_USD",  "sum"),
 ).reset_index()
 
-labour_rate = 15.0  # $15/hr assumed
 labour_weekly = (
-    df.copy()
-    .assign(_week=lambda d: d["Timestamp"].dt.to_period("W").astype(str))
+    cost_df
     .groupby("_week")["Workforce_Deployed"].sum()
-    .mul(8 * labour_rate)
+    .mul(EVENT_DURATION_HOURS * LABOUR_RATE_USD_PER_HOUR)
     .reset_index(name="labour")
 )
 weekly = weekly.merge(labour_weekly, on="_week", how="left").fillna(0)
@@ -242,7 +282,6 @@ background:{COLORS['card_bg']}; text-align:center;">
 <div style="font-size:15px; font-weight:700; color:{risk_color}; margin-top:6px;">
 {risk_category}
 </div>
- Risk bar 
 <div style="background:#333; border-radius:6px; height:10px; margin-top:14px;">
 <div style="background:{risk_color}; border-radius:6px; height:10px;
         width:{pct_risk}%; transition:width 0.4s;"></div>
@@ -333,6 +372,7 @@ with col_esc:
             from hitl.manager import HitlManager
             HitlManager().enqueue("finance", "Finance", {
                 "monthly_spend":  spent_usd,
+                "approved_spend": approved_status.get("spent_usd", 0.0),
                 "budget":         monthly_budget,
                 "pct_used":       pct_used,
                 "health_score":   health_score,

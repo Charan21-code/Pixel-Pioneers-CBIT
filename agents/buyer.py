@@ -37,8 +37,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Estimated per-unit cost (USD) used when no cost data is in df
-_DEFAULT_UNIT_COST_USD = 0.50
+# Estimated per-unit cost (USD) used when no quote data is available in df
+_DEFAULT_UNIT_COST_USD = 5.00
 
 
 class BuyerAgent(BaseAgent):
@@ -71,8 +71,10 @@ class BuyerAgent(BaseAgent):
         dict with keys:
             reorders                  list  — one entry per triggered reorder
             total_spend_requested_usd float — sum across all reorder costs
+            total_approved_spend_usd  float — approved portion logged by Finance
             facilities_checked        int
             reorders_triggered        int
+            summary                   str   — Buyer narrative for the dashboard
         """
         df: pd.DataFrame = context.get("df", pd.DataFrame())
         forecast: dict   = context.get("forecast", {})
@@ -85,7 +87,9 @@ class BuyerAgent(BaseAgent):
         inventory_snap = self._inventory_snapshot(df)
 
         reorders: list[dict] = []
-        total_spend          = 0.0
+        total_requested_spend = 0.0
+        total_approved_spend  = 0.0
+        summary               = ""
 
         # ── Step 2: Evaluate each facility ───────────────────────────────────
         for fac, snap in inventory_snap.items():
@@ -107,7 +111,7 @@ class BuyerAgent(BaseAgent):
                 continue
 
             # Estimate cost
-            estimated_cost = reorder_qty * _DEFAULT_UNIT_COST_USD
+            estimated_cost = reorder_qty * snap.get("unit_price", _DEFAULT_UNIT_COST_USD)
 
             # ── Step 3: Finance clearance (mandatory gate) ────────────────────
             clearance_request = {
@@ -148,39 +152,46 @@ class BuyerAgent(BaseAgent):
                 "item":                 snap["product"],
                 "current_stock":        current_stock,
                 "reorder_qty":          reorder_qty,
+                "base_cost_usd":        round(estimated_cost, 2),
                 "estimated_cost_usd":   float(clearance["total_cost_usd"]),
+                "total_cost_usd":       float(clearance["total_cost_usd"]),
                 "clearance_decision":   decision,
                 "clearance_token":      clearance.get("clearance_token"),
                 "risk_score":           clearance.get("risk_score", 0.0),
                 "budget_remaining_usd": clearance.get("budget_status", {}).get("remaining_usd", 0.0),
             }
             reorders.append(reorder_entry)
+            total_requested_spend += float(clearance["total_cost_usd"])
 
             if decision == "auto_approve":
-                total_spend += clearance["total_cost_usd"]
+                total_approved_spend += clearance["total_cost_usd"]
 
         # ── Step 6: Ollama call for supplier rationale ────────────────────────
         if reorders:
             llm_out = self._ask_ollama(reorders)
-            # Attach supplier suggestion to first reorder (or all)
+            summary = llm_out.get("summary", self._heuristic_summary(reorders))
             for i, rec in enumerate(reorders):
-                rec["supplier"] = llm_out.get("suppliers", [{}])[i].get(
-                    "supplier", "Preferred supplier"
-                ) if i < len(llm_out.get("suppliers", [])) else "Preferred supplier"
+                supplier_info = llm_out.get("suppliers", [{}])[i] if i < len(llm_out.get("suppliers", [])) else {}
+                rec["supplier"] = supplier_info.get("supplier", "Preferred supplier")
+                rec["supplier_rationale"] = supplier_info.get("rationale", "")
 
         if not reorders:
+            summary = "All facility inventory levels are above safety thresholds."
             self.publish_signal(
                 severity="INFO",
-                message="All facility inventory levels are above safety thresholds.",
+                message=summary,
                 confidence_pct=95.0,
                 action_taken="No reorder required",
             )
 
         return {
             "reorders":                  reorders,
-            "total_spend_requested_usd": round(total_spend, 2),
+            "total_spend_requested_usd": round(total_requested_spend, 2),
+            "total_approved_spend_usd":  round(total_approved_spend, 2),
             "facilities_checked":        len(inventory_snap),
             "reorders_triggered":        len(reorders),
+            "summary":                   summary,
+            "narrative":                 summary,
         }
 
     # ── Private helpers ───────────────────────────────────────────────────────
@@ -192,14 +203,20 @@ class BuyerAgent(BaseAgent):
         """
         result = {}
         try:
-            # Use last (most recent) row per facility for current stock
+            # Use last (most recent) row per facility for current stock.
             latest = df.sort_values("Timestamp").groupby("Assigned_Facility").last().reset_index()
             for _, row in latest.iterrows():
                 fac = row["Assigned_Facility"]
+                fac_df = df[df["Assigned_Facility"] == fac]
+                quote_series = pd.Series(dtype=float)
+                if "Live_Supplier_Quote_USD" in fac_df.columns:
+                    quote_series = fac_df["Live_Supplier_Quote_USD"].replace(0, pd.NA).dropna()
+                unit_price = float(quote_series.mean()) if not quote_series.empty else _DEFAULT_UNIT_COST_USD
                 result[fac] = {
                     "inventory_units":      float(row.get("Raw_Material_Inventory_Units", 0)),
                     "inventory_threshold":  float(row.get("Inventory_Threshold", 0)),
-                    "product":              str(row.get("Product_ID", "Unknown")),
+                    "product":              str(row.get("Product_Category", row.get("Product_ID", "Unknown"))),
+                    "unit_price":           round(unit_price, 3),
                 }
         except Exception as exc:
             logger.warning("[Buyer] Inventory snapshot failed: %s", exc)
@@ -210,6 +227,7 @@ class BuyerAgent(BaseAgent):
         One LLM call to get supplier selection rationale.
         Expected JSON:
         {
+          "summary": "2-3 sentence inventory summary",
           "suppliers": [
             {"facility": "...", "supplier": "...", "rationale": "..."}
           ]
@@ -226,6 +244,7 @@ The following purchase orders have been approved and need supplier assignment:
 
 Respond ONLY with a JSON object using exactly this structure:
 {{
+  "summary": "2-3 sentence inventory summary with the highest-priority action",
   "suppliers": [
     {{
       "facility": "exact facility name",
@@ -236,11 +255,26 @@ Respond ONLY with a JSON object using exactly this structure:
 }}"""
         return self.call_ollama(prompt)
 
+    def _heuristic_summary(self, reorders: list[dict]) -> str:
+        urgent = [
+            f"{r['facility']} ({r['reorder_qty']:,} units, ${r['total_cost_usd']:,.0f})"
+            for r in reorders[:3]
+        ]
+        total_cost = sum(float(r.get("total_cost_usd", 0.0)) for r in reorders)
+        return (
+            f"{len(reorders)} facility reorder(s) need attention. "
+            f"Highest-priority actions: {', '.join(urgent)}. "
+            f"Estimated total procurement exposure is ${total_cost:,.0f}."
+        )
+
     def _empty_result(self, reason: str) -> dict:
         self.publish_signal(severity="WARNING", message=reason, confidence_pct=0.0)
         return {
             "reorders":                  [],
             "total_spend_requested_usd": 0.0,
+            "total_approved_spend_usd":  0.0,
             "facilities_checked":        0,
             "reorders_triggered":        0,
+            "summary":                   reason,
+            "narrative":                 reason,
         }

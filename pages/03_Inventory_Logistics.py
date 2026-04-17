@@ -1,6 +1,6 @@
 """
 pages/03_Inventory_Logistics.py — Inventory & Logistics (Buyer Agent)
-Phase 3: Full implementation.
+Phase 4: lead-time-aware inventory monitoring and procurement workflow.
   - 5 per-plant inventory status cards with lead-time logic
   - Lead Time Warning banners for emergency plants
   - Stock vs Threshold horizontal bar chart
@@ -71,9 +71,9 @@ st.subheader("🏭 Plant Inventory Status")
 
 STATUS_CONFIG = {
     "healthy":   {"icon": "✅", "label": "HEALTHY",          "css_key": "healthy"},
-    "low":       {"icon": "⚠️",  "label": "LOW — Order Soon", "css_key": "warning"},
-    "critical":  {"icon": "🔴", "label": "CRITICAL — Order Now",              "css_key": "critical"},
-    "emergency": {"icon": "🚨", "label": "EMERGENCY — Lead Time Exceeds Stock!", "css_key": "critical"},
+    "low":       {"icon": "⚠️",  "label": "LOW — ORDER SOON", "css_key": "warning"},
+    "critical":  {"icon": "🔴", "label": "CRITICAL — ORDER IMMEDIATELY", "css_key": "critical"},
+    "emergency": {"icon": "🚨", "label": "EMERGENCY — LEAD TIME EXCEEDS STOCK", "css_key": "critical"},
 }
 
 if inv_data:
@@ -124,8 +124,6 @@ margin-bottom:12px; min-height:290px;">
 &nbsp;{plant[plant.find("("):] if "(" in plant else ""}
 </span>
 </div>
-
- Stock progress bar 
 <div style="background:#333; border-radius:4px; height:6px; margin-bottom:12px;">
 <div style="background:{bar_color}; border-radius:4px; height:6px; width:{bar_pct}%;"></div>
 </div>
@@ -283,6 +281,14 @@ if inv_data:
         })
 
     rdf = pd.DataFrame(reorder_rows)
+    urgency_order = {
+        "🚨 EMERGENCY": 0,
+        "🔴 Order Now": 1,
+        "🟡 Order Soon": 2,
+        "✅ OK": 3,
+    }
+    rdf["_urgency_rank"] = rdf["Urgency"].map(urgency_order).fillna(99)
+    rdf = rdf.sort_values(["_urgency_rank", "Plant"]).drop(columns=["_urgency_rank"])
     st.dataframe(rdf, use_container_width=True, hide_index=True)
 else:
     st.info("Run agents to generate reorder recommendations.")
@@ -292,7 +298,7 @@ st.markdown("---")
 st.subheader("📜 Procurement History")
 
 if "Procurement_Action" in df.columns:
-    proc_events = df[df["Procurement_Action"] != "None"].copy()
+    proc_events = df[df["Procurement_Action"] == "Auto-Ordered via API"].copy()
     if not proc_events.empty:
         disp_cols = [c for c in [
             "Timestamp", "Assigned_Facility", "Procurement_Action",

@@ -37,6 +37,15 @@ PLOT_THEME = dict(
     legend=dict(bgcolor="#0E1117", bordercolor="#333", borderwidth=1),
 )
 
+PRODUCT_ORDER = [
+    "Galaxy S Smartphone",
+    "Galaxy A Smartphone",
+    "Galaxy Tab",
+    "Neo QLED TV",
+    "EcoBubble Washing Machine",
+    "Bespoke Refrigerator",
+]
+
 
 def orch() -> dict:
     return st.session_state.get("orch_output") or {}
@@ -203,7 +212,12 @@ tab_prod, tab_region = st.tabs(["📦 By Product", "🌍 By Region"])
 with tab_prod:
     st.subheader("Demand by Product Category")
 
-    products = sorted(df["Product_Category"].unique().tolist()) if "Product_Category" in df.columns else []
+    if "Product_Category" in df.columns:
+        discovered = df["Product_Category"].dropna().unique().tolist()
+        products = [p for p in PRODUCT_ORDER if p in discovered]
+        products.extend(sorted(p for p in discovered if p not in products))
+    else:
+        products = []
     if not products:
         st.info("No product category data available.")
     else:

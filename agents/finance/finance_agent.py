@@ -11,7 +11,8 @@ Public API used by other agents:
     finance.run(context)                 -> dict  (called by Orchestrator)
 
 Phase 3 additions to run():
-    - proposed_plan_cost derived from df supplier quotes
+    - live budget snapshot derived from current df costs
+    - proposed_plan_cost derived from pending Buyer reorders
     - Ollama call for actionable cost-reduction suggestions[]
     - Ollama call for full narrative summary
     - financial risk_score (composite of OEE, inventory, demand, carbon)
@@ -30,6 +31,9 @@ from agents.finance.risk_scorer     import RiskScorer
 from agents.finance.approval_router import ApprovalRouter
 
 logger = logging.getLogger(__name__)
+
+_LABOUR_RATE_USD_PER_HOUR = 15.0
+_EVENT_DURATION_HOURS = 2.0
 
 
 class FinanceAgent(BaseAgent):
@@ -143,9 +147,10 @@ class FinanceAgent(BaseAgent):
         Returns
         -------
         dict with:
-            budget_status        dict  — spent/remaining/pct_used
+            budget_status        dict  — live operating spend/remaining/pct_used
+            approved_spend_status dict — approved spend logged in monthly_spend
             health_score         float — 0–100 fiscal health
-            proposed_plan_cost   float — estimated cost of current production plan
+            proposed_plan_cost   float — base cost of pending reorders / planned spend
             risk_score           float — composite 0–100 financial risk
             gate_decision        str   — "APPROVED" | "BLOCKED"
             suggestions          list  — Ollama cost-reduction tips
@@ -157,21 +162,32 @@ class FinanceAgent(BaseAgent):
         mechanic    = context.get("mechanic", {})
         environ     = context.get("environ",  {})
 
-        budget_status = self.budget_tracker.get_status()
-        health_score  = self.financial_health_score()
+        approved_spend_status = self.budget_tracker.get_status()
+        budget_status         = self._derive_live_budget_status(df)
+        monthly_budget        = config.FINANCE["monthly_budget"]
+        spent_usd             = budget_status.get("spent_usd", 0.0)
+        remaining_usd         = budget_status.get("remaining_usd", monthly_budget)
+        health_score          = round(
+            max(0.0, min(100.0, (remaining_usd / monthly_budget) * 100)),
+            1,
+        )
 
-        # ── Derive proposed plan cost from df supplier quotes ─────────────────
-        proposed_plan_cost = 0.0
-        if not df.empty:
-            try:
-                proposed_plan_cost = float(df["Live_Supplier_Quote_USD"].sum())
-            except Exception:
-                proposed_plan_cost = 0.0
+        # Pending Buyer requests are the best proxy for incremental plan cost.
+        proposed_plan_cost = round(
+            sum(float(r.get("base_cost_usd", 0.0)) for r in buyer_out.get("reorders", [])),
+            2,
+        )
+        if proposed_plan_cost <= 0 and buyer_out.get("reorders"):
+            proposed_plan_cost = round(
+                sum(float(r.get("estimated_cost_usd", 0.0)) for r in buyer_out.get("reorders", []))
+                / max(config.FINANCE["overhead_multiplier"], 1e-9),
+                2,
+            )
 
-        overhead       = proposed_plan_cost * config.FINANCE["overhead_multiplier"]
+        projected_total = proposed_plan_cost * config.FINANCE["overhead_multiplier"]
+        overhead_only   = projected_total - proposed_plan_cost
         monthly_budget = config.FINANCE["monthly_budget"]
-        spent_usd      = budget_status.get("spent_usd", 0.0)
-        gate_ok        = (spent_usd + overhead) <= monthly_budget
+        gate_ok        = (spent_usd + projected_total) <= monthly_budget
         gate_decision  = "APPROVED" if gate_ok else "BLOCKED"
 
         # ── Composite financial risk score (0–100, higher = riskier) ─────────
@@ -204,16 +220,57 @@ class FinanceAgent(BaseAgent):
         )
 
         return {
-            "budget_status":      budget_status,
-            "health_score":       health_score,
-            "proposed_plan_cost": round(proposed_plan_cost, 2),
-            "risk_score":         risk_score,
-            "gate_decision":      gate_decision,
-            "suggestions":        suggestions,
-            "summary":            summary,
+            "budget_status":         budget_status,
+            "approved_spend_status": approved_spend_status,
+            "health_score":          health_score,
+            "proposed_plan_cost":    round(proposed_plan_cost, 2),
+            "proposed_overhead_usd": round(overhead_only, 2),
+            "projected_total_usd":   round(spent_usd + projected_total, 2),
+            "risk_score":            risk_score,
+            "gate_decision":         gate_decision,
+            "suggestions":           suggestions,
+            "summary":               summary,
         }
 
     # ── Private helpers ───────────────────────────────────────────────────────
+
+    def _derive_live_budget_status(self, df: pd.DataFrame) -> dict:
+        """
+        Estimate live operating spend from the current data window.
+
+        The dataset is recorded at a 2-hour cadence, so labour is valued per
+        event at 2 hours rather than a full 8-hour shift to avoid inflating
+        spend by 4× on the dashboard.
+        """
+        procurement_usd = 0.0
+        carbon_usd      = 0.0
+        labour_usd      = 0.0
+
+        if not df.empty:
+            try:
+                procurement_usd = float(df.get("Live_Supplier_Quote_USD", pd.Series(dtype=float)).sum())
+                carbon_usd      = float(df.get("Carbon_Cost_Penalty_USD", pd.Series(dtype=float)).sum())
+                workforce_total = float(df.get("Workforce_Deployed", pd.Series(dtype=float)).sum())
+                labour_usd      = workforce_total * _EVENT_DURATION_HOURS * _LABOUR_RATE_USD_PER_HOUR
+            except Exception as exc:
+                logger.warning("[FinanceAgent] Live spend derivation failed: %s", exc)
+
+        spent_usd    = procurement_usd + carbon_usd + labour_usd
+        remaining_usd = config.FINANCE["monthly_budget"] - spent_usd
+        pct_used     = (
+            spent_usd / config.FINANCE["monthly_budget"] * 100
+            if config.FINANCE["monthly_budget"] > 0 else 0.0
+        )
+        return {
+            "spent_usd":       round(spent_usd, 2),
+            "remaining_usd":   round(remaining_usd, 2),
+            "pct_used":        round(pct_used, 2),
+            "over_budget":     remaining_usd < 0,
+            "procurement_usd": round(procurement_usd, 2),
+            "carbon_usd":      round(carbon_usd, 2),
+            "labour_usd":      round(labour_usd, 2),
+            "cost_basis":      "live_df",
+        }
 
     def _compute_financial_risk(
         self,
