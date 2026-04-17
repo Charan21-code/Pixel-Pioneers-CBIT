@@ -15,7 +15,10 @@ import streamlit as st
 
 import config
 from agents.scheduler import SchedulerAgent
+from dashboard_runtime import bootstrap_page, render_ollama_fallback_notice
 from simulation.digital_twin import derive_defaults_from_agent_output, simulate
+
+bootstrap_page("Digital Twin", "🧬")
 
 COLORS = st.session_state.get("_COLORS", {
     "healthy": "#00C896",
@@ -382,6 +385,7 @@ def _render_trajectory_chart(result: dict, baseline_result: dict) -> None:
 
 st.title("Digital Twin Simulation")
 st.markdown("Run plant-level what-if simulations using live defaults from the current agent outputs.")
+render_ollama_fallback_notice("Digital Twin follow-up chat")
 
 if df.empty:
     st.warning("No data available.")

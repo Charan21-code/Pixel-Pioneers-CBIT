@@ -18,6 +18,9 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import config
+from dashboard_runtime import bootstrap_page, render_ollama_fallback_notice
+
+bootstrap_page("Finance Dashboard", "💰")
 
 # ── Colour palette ────────────────────────────────────────────────────────────
 COLORS = st.session_state.get("_COLORS", {
@@ -69,6 +72,7 @@ def live_budget_status_from_df(frame: pd.DataFrame) -> dict:
 # ── Page header ───────────────────────────────────────────────────────────────
 st.title("💰 Finance Dashboard")
 st.markdown("Budget utilisation, gate decisions, risk scoring, and cost-reduction suggestions.")
+render_ollama_fallback_notice("finance suggestions and narrative")
 
 if df.empty:
     st.warning("⚠️ No production data loaded yet. Advance the simulation clock from the sidebar.")

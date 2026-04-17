@@ -14,6 +14,9 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import config
+from dashboard_runtime import bootstrap_page, render_ollama_fallback_notice
+
+bootstrap_page("Inventory & Logistics", "📦")
 
 # ── Colour palette ────────────────────────────────────────────────────────────
 COLORS = st.session_state.get("_COLORS", {
@@ -41,6 +44,7 @@ def orch() -> dict:
 # ── Page header ───────────────────────────────────────────────────────────────
 st.title("📦 Inventory & Logistics")
 st.markdown("Real-time inventory status, lead time analysis, and procurement workflow.")
+render_ollama_fallback_notice("buyer analysis and procurement recommendations")
 
 if df.empty:
     st.warning("⚠️ No production data loaded yet. Advance the simulation clock from the sidebar.")

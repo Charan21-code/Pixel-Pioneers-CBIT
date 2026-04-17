@@ -10,6 +10,9 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import config
+from dashboard_runtime import bootstrap_page, render_ollama_fallback_notice
+
+bootstrap_page("Machine Health", "🔧")
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 COLORS = st.session_state.get("_COLORS", {
@@ -38,6 +41,7 @@ def rgba(hex_color: str, alpha: float) -> str:
 # ── Page ──────────────────────────────────────────────────────────────────────
 st.title("🔧 Machine Health & OEE (Mechanic Agent)")
 st.markdown("Per-plant sensor telemetry, risk assessment, and maintenance recommendations.")
+render_ollama_fallback_notice("maintenance recommendations")
 
 if df.empty:
     st.warning("No data available. Advance the time cursor to load data.")

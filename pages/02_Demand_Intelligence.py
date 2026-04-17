@@ -16,6 +16,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import timedelta
 import config
+from dashboard_runtime import bootstrap_page, render_ollama_fallback_notice
+
+bootstrap_page("Demand Intelligence", "📈")
 
 # ── Colour palette (falls back if app.py hasn't set session_state colours) ──
 COLORS = st.session_state.get("_COLORS", {
@@ -64,6 +67,7 @@ def rgba(hex_color: str, alpha: float) -> str:
 # ── Page header ──────────────────────────────────────────────────────────────
 st.title("📈 Demand Intelligence")
 st.markdown("Machine-learning demand forecasting, anomaly detection, and product/region breakdown.")
+render_ollama_fallback_notice("forecast narratives and recommended actions")
 
 if df.empty:
     st.warning("⚠️ No production data loaded yet. Advance the simulation clock from the sidebar.")
@@ -202,7 +206,7 @@ if has_ml and not proj_df.empty:
 # Vertical divider between historical and projection
 if has_ml:
     fig.add_vline(
-        x=str(daily["Timestamp"].max()),
+        x=daily["Timestamp"].max().timestamp() * 1000,
         line_dash="dash", line_color="#555", line_width=1,
         annotation_text="Projection →", annotation_position="top right",
         annotation_font_color="#888",

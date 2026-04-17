@@ -17,6 +17,9 @@ import numpy as np
 import plotly.graph_objects as go
 import sqlite3
 import config
+from dashboard_runtime import bootstrap_page, render_ollama_fallback_notice
+
+bootstrap_page("Production Plan", "🗓️")
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 COLORS = st.session_state.get("_COLORS", {
@@ -36,6 +39,7 @@ def orch() -> dict:
 # ── Page ──────────────────────────────────────────────────────────────────────
 st.title("🗓️ Production Plan (Scheduler Agent)")
 st.markdown("Per-plant 7-day shift plans with readiness gating and inline approval workflow.")
+render_ollama_fallback_notice("Scheduler planning")
 
 if df.empty:
     st.warning("No data available. Advance the time cursor to load data.")

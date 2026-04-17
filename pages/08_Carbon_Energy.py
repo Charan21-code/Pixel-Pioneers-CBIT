@@ -9,6 +9,9 @@ import plotly.express as px
 import streamlit as st
 
 import config
+from dashboard_runtime import bootstrap_page, render_ollama_fallback_notice
+
+bootstrap_page("Carbon & Energy", "🌱")
 
 COLORS = st.session_state.get("_COLORS", {
     "healthy": "#00C896",
@@ -27,6 +30,7 @@ def orch() -> dict:
 
 st.title("Carbon & Energy Dashboard")
 st.markdown("Track peak-hour emissions, compliance risk, and timing changes that reduce carbon penalties.")
+render_ollama_fallback_notice("environmental recommendations")
 
 if df.empty:
     st.warning("No data available.")
