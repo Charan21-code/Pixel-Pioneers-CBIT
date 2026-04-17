@@ -361,27 +361,7 @@ def render_sidebar() -> None:
 
 
 def _arm_auto_refresh() -> None:
-    interval_secs = int(config.DASHBOARD.get("auto_refresh_secs", 30))
-    fragment = getattr(st, "fragment", None) or getattr(st, "experimental_fragment", None)
-    st.session_state["_auto_refresh_supported"] = fragment is not None
-
-    if fragment is None or interval_secs <= 0:
-        return
-
-    @fragment(run_every=f"{interval_secs}s")
-    def _auto_refresh_fragment() -> None:
-        if st.session_state.get("pause_auto_refresh", False):
-            return
-
-        last_interaction = float(st.session_state.get("_last_user_interaction_at", time.time()))
-        idle_for = time.time() - last_interaction
-        if idle_for < interval_secs:
-            return
-
-        st.session_state["_auto_refresh_pending"] = True
-        st.rerun()
-
-    _auto_refresh_fragment()
+    st.session_state["_auto_refresh_supported"] = False
 
 
 def render_ollama_fallback_notice(feature_name: str) -> None:
