@@ -481,7 +481,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.subheader("⏱️ Simulation Controls")
     
-    st.sidebar.markdown(f"**Current Time:**\n{current_time.strftime('%Y-%m-%d %H:%00')}")
+    st.sidebar.markdown(f"**Current Time:**\n{current_time.strftime('%Y-%m-%d %H:00')}")
     st.sidebar.markdown(f"**Events Processed:** {st.session_state.time_cursor} / {len(df_full)}")
     
     step_size = st.sidebar.slider("Simulation Speed (Events per tick)", 1, 50, 10)
