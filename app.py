@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import timedelta
 import time
+import sqlite3
 
 # ==========================================
 # ⚙️ CONFIGURATION
@@ -28,12 +29,14 @@ COLORS = {
 # ==========================================
 # 📦 DATA LOADING
 # ==========================================
-@st.cache_data
+@st.cache_data(ttl=5) # Reduced TTL so fresh data can be queried more often if needed
 def load_data():
-    # Load the CSV file
     try:
-        df = pd.read_csv("data.csv")
-        df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+        conn = sqlite3.connect("production.db")
+        df = pd.read_sql_query("SELECT * FROM production_events", conn)
+        conn.close()
+        df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
+        df = df.dropna(subset=['Timestamp'])
         df = df.sort_values(by='Timestamp').reset_index(drop=True)
         return df
     except Exception as e:
@@ -45,7 +48,7 @@ def load_data():
             'Inventory_Threshold','Procurement_Action','Live_Supplier_Quote_USD','Grid_Pricing_Period',
             'Energy_Consumed_kWh','Carbon_Emissions_kg','Carbon_Cost_Penalty_USD'
         ])
-        st.error(f"Failed to load data.csv: {e}")
+        st.error(f"Failed to load data from production.db: {e}")
         return df
 
 df_full = load_data()
@@ -56,10 +59,18 @@ df_full = load_data()
 if 'time_cursor' not in st.session_state:
     st.session_state.time_cursor = min(100, len(df_full)) # Start with 100 rows
 
-if 'agent_log' not in st.session_state:
-    st.session_state.agent_log = pd.DataFrame(columns=[
-        'logged_at', 'agent_name', 'severity', 'order_id', 'facility', 'message', 'confidence_pct', 'action_taken'
-    ])
+def get_agent_log():
+    try:
+        conn = sqlite3.connect("production.db")
+        log_df = pd.read_sql_query("SELECT * FROM agent_events ORDER BY logged_at DESC LIMIT 500", conn)
+        conn.close()
+        log_df['logged_at'] = pd.to_datetime(log_df['logged_at'])
+        # Map facility_id back to facility if needed, or alias it for UI consistency
+        if 'facility_id' in log_df.columns:
+            log_df.rename(columns={'facility_id': 'facility'}, inplace=True)
+        return log_df
+    except Exception as e:
+        return pd.DataFrame(columns=['logged_at', 'agent_name', 'severity', 'order_id', 'facility', 'message', 'confidence_pct', 'action_taken'])
 
 def advance_time(steps=10):
     if st.session_state.time_cursor + steps <= len(df_full):
@@ -68,19 +79,19 @@ def advance_time(steps=10):
         st.session_state.time_cursor = len(df_full)
 
 def log_agent_event(agent_name, severity, order_id, facility, message, confidence_pct, action_taken):
-    new_log = pd.DataFrame([{
-        'logged_at': pd.Timestamp.now(),
-        'agent_name': agent_name,
-        'severity': severity,
-        'order_id': order_id,
-        'facility': facility,
-        'message': message,
-        'confidence_pct': confidence_pct,
-        'action_taken': action_taken
-    }])
-    st.session_state.agent_log = pd.concat([new_log, st.session_state.agent_log], ignore_index=True)
-    if len(st.session_state.agent_log) > 500:
-        st.session_state.agent_log = st.session_state.agent_log.head(500)
+    # Log directly to SQLite DB
+    try:
+        conn = sqlite3.connect("production.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO agent_events (agent_name, severity, order_id, facility_id, message, confidence_pct, action_taken)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (agent_name, severity, order_id, facility, message, confidence_pct, action_taken))
+        conn.commit()
+    except Exception as e:
+        print(f"Error logging agent event: {e}")
+    finally:
+        conn.close()
 
 # Simulate streaming data based on cursor
 df = df_full.iloc[:st.session_state.time_cursor].copy()
@@ -124,7 +135,7 @@ def run_agents():
 
     # 5. Orchestrator Agent (Combines signals)
     # Check if any recent critical events
-    recent_critical = st.session_state.agent_log.head(10)
+    recent_critical = get_agent_log().head(10)
     critical_events = recent_critical[recent_critical['severity'] == 'CRITICAL']
     if not critical_events.empty:
         for idx, crit_row in critical_events.iterrows():
@@ -148,7 +159,8 @@ def render_command_center():
     
     if not df.empty:
         on_time_pct = (df['Schedule_Status'] == 'On-Time').mean() * 100
-        active_alerts = len(st.session_state.agent_log[st.session_state.agent_log['severity'] != 'INFO'])
+        log_df = get_agent_log()
+        active_alerts = len(log_df[log_df['severity'] != 'INFO'])
         last_24h = df[df['Timestamp'] >= current_time - timedelta(hours=24)]
         carbon_penalty = last_24h['Carbon_Cost_Penalty_USD'].sum() if not last_24h.empty else 0
         workforce_cov = (df['Workforce_Deployed'].sum() / df['Workforce_Required'].sum() * 100) if df['Workforce_Required'].sum() > 0 else 0
@@ -189,7 +201,8 @@ def render_command_center():
     
     # Agent Log
     st.subheader("🕵️‍♂️ Live Agent Activity Log")
-    if not st.session_state.agent_log.empty:
+    log_df = get_agent_log()
+    if not log_df.empty:
         # Style the dataframe
         def color_severity(val):
             color = COLORS['healthy']
@@ -197,7 +210,7 @@ def render_command_center():
             elif val == 'CRITICAL': color = COLORS['critical']
             return f'color: {color}; font-weight: bold;'
             
-        styled_df = st.session_state.agent_log.head(50).style.map(color_severity, subset=['severity'])
+        styled_df = log_df.head(50).style.map(color_severity, subset=['severity'])
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
     else:
         st.info("No agent activity logged yet.")
@@ -275,7 +288,8 @@ def render_production_schedule():
     st.plotly_chart(fig, use_container_width=True)
     
     with st.expander("🤖 Orchestrator Agent Reasoning"):
-        orch_logs = st.session_state.agent_log[st.session_state.agent_log['agent_name'] == 'Orchestrator']
+        log_df = get_agent_log()
+        orch_logs = log_df[log_df['agent_name'] == 'Orchestrator']
         if not orch_logs.empty:
             for _, row in orch_logs.head(10).iterrows():
                 st.write(f"**{row['logged_at'].strftime('%Y-%m-%d %H:%M:%S')}** | {row['facility']}")
@@ -492,7 +506,12 @@ def main():
         st.rerun()
     if col2.button("🔄 Reset"):
         st.session_state.time_cursor = min(100, len(df_full))
-        st.session_state.agent_log = st.session_state.agent_log.iloc[0:0] # clear
+        # Clear database agent log
+        conn = sqlite3.connect("production.db")
+        conn.execute("DELETE FROM agent_events;")
+        conn.commit()
+        conn.close()
+        # st.cache_data.clear()  # Optional: clear if data resets, but not needed since events don't change
         st.rerun()
 
     # Render selected page
