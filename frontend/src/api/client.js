@@ -49,4 +49,14 @@ export const twinChat           = (body)    => api.post('/twin/chat', body)
 export const getTwinModelStatus = ()        => api.get('/twin/model/status')
 export const applyScenario      = (body)    => api.post('/twin/apply-scenario', body)
 
+// ── ERP Integration Layer ──────────────────────────────────────────────────
+export const getErpStatus        = ()        => api.get('/erp/status')
+export const getErpAudit         = (p={})    => api.get('/erp/audit',   { params: p })
+export const getErpAuditById     = (id)      => api.get(`/erp/audit/${id}`)
+export const getErpEvents        = (p={})    => api.get('/erp/events',  { params: p })
+export const pushErpOrder        = (body)    => api.post('/erp/push-order', body)
+export const switchErpAdapter    = (body)    => api.post('/erp/switch', body)
+export const getErpInventory     = (plantId) => api.get(`/erp/inventory/${encodeURIComponent(plantId)}`)
+export const getErpMachines      = (plantId) => api.get(`/erp/machines/${encodeURIComponent(plantId)}`)
+
 export default api

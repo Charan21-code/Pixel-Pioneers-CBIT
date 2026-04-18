@@ -214,7 +214,7 @@ export default function CommandCenter({ onRunAgents, running }) {
           <span className="ops-hero-chip">{hero.label}</span>
           <h2>
             <HeroIcon size={20} />
-            OPS//CORE Global Health
+            PROXIMA
           </h2>
           <p>{hero.text}</p>
         </div>

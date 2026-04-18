@@ -8,35 +8,33 @@ import * as api from '../api/client'
 import './AgentReasoning.css'
 
 /* ── Agent metadata ─────────────────────────────────────────────────────── */
-// Layout: 3 cols × 3 rows
-//   Row 0: Forecaster (col1) | Mechanic (col2) | Buyer (col3)
-//   Row 1: Environ   (col1) | Finance  (col2) | Scheduler (col3)
-//   Row 2: (empty)           | Orchestrator (col2) | (empty)
+// Hub-and-spoke layout — Finance is the central hub.
+// Positions are expressed as percentages [cx%, cy%] of the SVG canvas.
+// Top arc: Forecaster (left), Mechanic (center), Buyer (right)
+// Middle: Environmentalist (left), Finance (CENTER), Scheduler (right)
+// Bottom: Orchestrator (center below Finance)
 const AGENTS = [
-  { id: 'Forecaster',       label: 'Forecaster',       subtitle: 'Demand Intelligence',    Icon: Brain,        color: 'var(--cyan)',   glow: 'var(--cyan-glow)',   col: 1, row: 0 },
-  { id: 'Mechanic',         label: 'Mechanic',          subtitle: 'Machine Health',         Icon: Cpu,          color: 'var(--amber)',  glow: 'var(--amber-glow)',  col: 2, row: 0 },
-  { id: 'Buyer',            label: 'Buyer',             subtitle: 'Procurement',            Icon: ShoppingCart, color: 'var(--green)',  glow: 'var(--green-glow)',  col: 3, row: 0 },
-  { id: 'Environmentalist', label: 'Environmentalist',  subtitle: 'Carbon & Energy',        Icon: Leaf,         color: 'var(--green)',  glow: 'var(--green-glow)',  col: 1, row: 1 },
-  { id: 'Finance',          label: 'Finance',           subtitle: 'Budget Gate',            Icon: DollarSign,   color: 'var(--amber)',  glow: 'var(--amber-glow)',  col: 2, row: 1 },
-  { id: 'Scheduler',        label: 'Scheduler',         subtitle: 'Production Planning',    Icon: Calendar,     color: 'var(--purple)', glow: 'var(--purple-glow)', col: 3, row: 1 },
-  { id: 'Orchestrator',     label: 'Orchestrator',      subtitle: 'System Supervisor',      Icon: GitBranch,    color: 'var(--red)',    glow: 'var(--red-glow)',    col: 2, row: 2 },
+  { id: 'Forecaster',       label: 'Forecaster',       subtitle: 'Demand Intelligence',    Icon: Brain,        color: 'var(--cyan)',   glow: 'var(--cyan-glow)',   px: 16.5, py: 12 },
+  { id: 'Mechanic',         label: 'Mechanic',          subtitle: 'Machine Health',         Icon: Cpu,          color: 'var(--amber)',  glow: 'var(--amber-glow)',  px: 50,   py: 12 },
+  { id: 'Buyer',            label: 'Buyer',             subtitle: 'Procurement',            Icon: ShoppingCart, color: 'var(--green)',  glow: 'var(--green-glow)',  px: 83.5, py: 12 },
+  { id: 'Environmentalist', label: 'Environmentalist',  subtitle: 'Carbon & Energy',        Icon: Leaf,         color: 'var(--green)',  glow: 'var(--green-glow)',  px: 16.5, py: 50 },
+  { id: 'Finance',          label: 'Finance',           subtitle: 'Budget Gate',            Icon: DollarSign,   color: 'var(--amber)',  glow: 'var(--amber-glow)',  px: 50,   py: 50 },
+  { id: 'Scheduler',        label: 'Scheduler',         subtitle: 'Production Planning',    Icon: Calendar,     color: 'var(--purple)', glow: 'var(--purple-glow)', px: 83.5, py: 50 },
+  { id: 'Orchestrator',     label: 'Orchestrator',      subtitle: 'System Supervisor',      Icon: GitBranch,    color: 'var(--red)',    glow: 'var(--red-glow)',    px: 50,   py: 88 },
 ]
 
-// Connections: [fromCol, fromRow, toCol, toRow]
-// Row-0 horizontal flow
-// Row-0 → Row-1 verticals
-// Row-1 → Orchestrator
+// Connections between agents by id
 const CONNECTIONS = [
-  [1, 0, 2, 0], // Forecaster  → Mechanic
-  [2, 0, 3, 0], // Mechanic    → Buyer
-  [1, 0, 1, 1], // Forecaster  → Environmentalist
-  [2, 0, 2, 1], // Mechanic    → Finance
-  [3, 0, 3, 1], // Buyer       → Scheduler
-  [1, 1, 2, 1], // Environ     → Finance
-  [3, 0, 2, 1], // Buyer       → Finance (clearance)
-  [2, 1, 3, 1], // Finance     → Scheduler
-  [2, 1, 2, 2], // Finance     → Orchestrator
-  [3, 1, 2, 2], // Scheduler   → Orchestrator
+  ['Forecaster',       'Mechanic'],        // top-row horizontal
+  ['Mechanic',         'Buyer'],           // top-row horizontal
+  ['Forecaster',       'Environmentalist'],// Forecaster  → Environ
+  ['Mechanic',         'Finance'],         // Mechanic    → Finance
+  ['Buyer',            'Scheduler'],       // Buyer       → Scheduler
+  ['Environmentalist', 'Finance'],         // Environ     → Finance
+  ['Buyer',            'Finance'],         // Buyer       → Finance (clearance)
+  ['Finance',          'Scheduler'],       // Finance     → Scheduler
+  ['Finance',          'Orchestrator'],    // Finance     → Orchestrator
+  ['Scheduler',        'Orchestrator'],    // Scheduler   → Orchestrator
 ]
 
 /* ── Msg type config ─────────────────────────────────────────────────────── */
@@ -48,18 +46,9 @@ const MSG_CFG = {
   escalate:  { label: 'ESCALATED', color: 'var(--purple)', bg: 'rgba(168,85,247,0.08)', icon: GitBranch },
 }
 
-/* ── Grid + SVG constants ────────────────────────────────────────────────── */
-// Each node cell is CW × CH pixels inside the SVG coordinate system
-const CW = 224   // horizontal cell width
-const CH = 180   // vertical cell height
+/* ── Node card dimensions ────────────────────────────────────────────────── */
 const NODE_W = 192  // card width  (must match CSS .rp-node width)
-const NODE_H = 130  // card height (must match CSS .rp-node height)
-// Node centre within its SVG cell
-const cx = col => (col - 1) * CW + NODE_W / 2
-const cy = row => row         * CH + NODE_H / 2
-// SVG canvas size  (3 cols × 3 rows, small padding)
-const SVG_W = 3 * CW + 40
-const SVG_H = 3 * CH + 40
+const NODE_H = 130  // card height (must match CSS .rp-node min-height)
 
 /* ── Agent Node ──────────────────────────────────────────────────────────── */
 function AgentNode({ agent, state, lastThought, hasBlocker }) {
@@ -100,9 +89,8 @@ function AgentNode({ agent, state, lastThought, hasBlocker }) {
 }
 
 /* ── SVG Connector ───────────────────────────────────────────────────────── */
-function Connector({ fromCol, fromRow, toCol, toRow, active, blocked }) {
-  const x1 = cx(fromCol), y1 = cy(fromRow)
-  const x2 = cx(toCol),   y2 = cy(toRow)
+// x1,y1,x2,y2 are already in SVG px coords (derived from % × container dims)
+function Connector({ x1, y1, x2, y2, active, blocked }) {
   const mx = (x1 + x2) / 2
 
   const stroke = blocked ? 'var(--red)' : active ? 'var(--primary)' : 'var(--border)'
@@ -147,10 +135,16 @@ function CoordCard({ msg, onClick }) {
         </span>
         <span className="rp-coord-ts">{ts}</span>
         <span className="rp-coord-from">{msg.from_agent}</span>
-        {msg.to_agent && !['All','HITL'].includes(msg.to_agent) && (
+        {msg.to_agent && !['All','HITL'].includes(
+          Array.isArray(msg.to_agent) ? msg.to_agent[0] : msg.to_agent
+        ) && (
           <>
             <ChevronRight size={10} style={{ color: 'var(--text-muted)' }} />
-            <span className="rp-coord-to">{typeof msg.to_agent === 'string' ? msg.to_agent.replace(/[\[\]"]/g, '') : msg.to_agent}</span>
+            <span className="rp-coord-to">
+              {Array.isArray(msg.to_agent)
+                ? msg.to_agent.join(', ')
+                : String(msg.to_agent).replace(/[\[\]"]/g, '')}
+            </span>
           </>
         )}
       </div>
@@ -237,7 +231,22 @@ function LogEntry({ entry, isLast }) {
 
 /* ── Main Page ───────────────────────────────────────────────────────────── */
 export default function AgentReasoning() {
-  const logRef = useRef(null)
+  const logRef   = useRef(null)
+  const graphRef = useRef(null)
+  const [graphSize, setGraphSize] = useState({ w: 800, h: 520 })
+
+  // Keep track of the rendered container size so the SVG viewBox stays in sync
+  useEffect(() => {
+    const el = graphRef.current
+    if (!el) return
+    const obs = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setGraphSize({ w: entry.contentRect.width, h: entry.contentRect.height })
+      }
+    })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
 
   const [logs,          setLogs]          = useState([])
   const [agentStates,   setAgentStates]   = useState({})
@@ -256,10 +265,9 @@ export default function AgentReasoning() {
 
   const fetchState = useCallback(async () => {
     try {
-      const [logData, activeData, coordData] = await Promise.all([
+      const [logData, activeData] = await Promise.all([
         api.getAgentLog({ limit: 60 }).catch(() => ({ log: [] })),
         api.getActiveAgent().catch(() => ({ is_running: false, active_agent: null, run_id: null })),
-        api.getCoordinationMessages().catch(() => ({ messages: [] })),
       ])
 
       setConnected(true)
@@ -269,6 +277,10 @@ export default function AgentReasoning() {
       const runId       = activeData?.run_id ?? null
 
       setIsRunning(running)
+
+      // Fetch coordination messages using the backend's current run_id
+      const coordData = await api.getCoordinationMessages(runId || undefined)
+        .catch(() => ({ messages: [] }))
 
       setCurrentRunId(prev => {
         if (prev !== runId && runId) {
@@ -379,41 +391,49 @@ export default function AgentReasoning() {
       {/* ── Pipeline Graph ── */}
       <div className="rp-graph-card">
         <div className="rp-graph-label">PIPELINE EXECUTION FLOW</div>
-        <div className="rp-graph-wrap" style={{ position: 'relative', width: SVG_W, minHeight: SVG_H }}>
+        {/* Container fills 100% width; height is fixed via CSS */}
+        <div className="rp-graph-wrap" ref={graphRef}>
 
-          {/* SVG connectors */}
+          {/* SVG connectors — 100%×100% overlay */}
           <svg
-            width={SVG_W}
-            height={SVG_H}
+            width="100%"
+            height="100%"
             style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', zIndex: 1 }}
+            viewBox={`0 0 ${graphSize.w} ${graphSize.h}`}
+            preserveAspectRatio="none"
           >
             <defs>
               <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
                 <path d="M0,0 L0,6 L8,3 z" fill="var(--text-muted)" />
               </marker>
             </defs>
-            {CONNECTIONS.map(([fc, fr, tc, tr], i) => {
-              const fromAgent = AGENTS.find(a => a.col === fc && a.row === fr)
-              const isActive  = fromAgent && agentStates[fromAgent.id] === 'thinking'
-              const isBlocked = fromAgent && blockerAgentIds.has(fromAgent.id)
+            {CONNECTIONS.map(([fromId, toId], i) => {
+              const fromAgent = AGENTS.find(a => a.id === fromId)
+              const toAgent   = AGENTS.find(a => a.id === toId)
+              if (!fromAgent || !toAgent) return null
+              const x1 = (fromAgent.px / 100) * graphSize.w
+              const y1 = (fromAgent.py / 100) * graphSize.h
+              const x2 = (toAgent.px   / 100) * graphSize.w
+              const y2 = (toAgent.py   / 100) * graphSize.h
+              const isActive  = agentStates[fromAgent.id] === 'thinking'
+              const isBlocked = blockerAgentIds.has(fromAgent.id)
               return (
                 <Connector key={i}
-                  fromCol={fc} fromRow={fr}
-                  toCol={tc}   toRow={tr}
+                  x1={x1} y1={y1} x2={x2} y2={y2}
                   active={isActive} blocked={isBlocked}
                 />
               )
             })}
           </svg>
 
-          {/* Agent nodes — absolutely positioned within the SVG coordinate space */}
+          {/* Agent nodes — absolutely positioned by % of container */}
           {AGENTS.map(agent => (
             <div
               key={agent.id}
               style={{
                 position: 'absolute',
-                left: cx(agent.col) - NODE_W / 2,
-                top:  cy(agent.row) - NODE_H / 2,
+                left: `calc(${agent.px}% - ${NODE_W / 2}px)`,
+                top:  `calc(${agent.py}% - ${NODE_H / 2}px)`,
                 zIndex: 2,
               }}
             >
@@ -442,7 +462,9 @@ export default function AgentReasoning() {
 
           {allOrdered.length === 0 ? (
             <div className="rp-empty-feed">
-              No coordination messages yet. Run agents to trigger negotiation protocol.
+              {currentRunId
+                ? '✅ No coordination conflicts in this run — agents resolved all decisions independently.'
+                : 'No coordination messages yet. Agents will post here when they negotiate blockers.'}
             </div>
           ) : (
             <div className="rp-coord-feed">

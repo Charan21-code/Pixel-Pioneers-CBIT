@@ -31,6 +31,11 @@ sys.path.insert(0, ROOT_DIR)
 
 import config
 from agents.orchestrator import OrchestratorAgent
+
+# ── ERP Integration Layer ─────────────────────────────────────────────────────
+sys.path.insert(0, BACKEND_DIR)
+from erp.erp_audit    import ERPAudit
+from erp.erp_listener import erp_listener_loop, should_replan, clear_replan_flag
 from hitl.manager import HitlManager
 from simulation.digital_twin import simulate, simulate_scenario_compare, derive_defaults_from_agent_output
 from simulation import twin_ml
@@ -72,8 +77,31 @@ async def _agent_loop():
             await loop.run_in_executor(None, _run_orchestrator_sync)
         except Exception as exc:
             logger.error("[AgentLoop] Orchestrator run raised an exception: %s", exc, exc_info=True)
+
+        # ── ERP-triggered replan ──────────────────────────────────────────────
+        if should_replan():
+            logger.info("[AgentLoop] ERP event triggered an extra replan.")
+            clear_replan_flag()
+            try:
+                await loop.run_in_executor(None, _run_orchestrator_sync)
+            except Exception as exc:
+                logger.error("[AgentLoop] ERP-replan failed: %s", exc, exc_info=True)
+
         logger.info("[AgentLoop] Run complete. Next run in %ds.", interval)
         await asyncio.sleep(interval)
+
+
+def _make_erp_adapter(adapter_name: str):
+    """Instantiate the correct ERPAdapter from the adapter name string."""
+    if adapter_name == "sap_mock":
+        from erp.erp_sap_mock import SapMockAdapter
+        return SapMockAdapter()
+    if adapter_name == "odoo_mock":
+        from erp.erp_odoo_mock import OdooMockAdapter
+        return OdooMockAdapter()
+    # Default: csv
+    from erp.erp_csv_adapter import CsvAdapter
+    return CsvAdapter(df_getter=lambda: _CACHE["df"])
 
 
 @asynccontextmanager
@@ -86,20 +114,38 @@ async def lifespan(app: FastAPI):
     logger.info("[Startup] Triggering Digital Twin ML training...")
     twin_ml.ensure_model_trained()
 
-    task = asyncio.create_task(_agent_loop())
-    logger.info("[Startup] Always-on agent loop scheduled.")
+    # ── ERP integration layer ──────────────────────────────────────────────
+    _CACHE["erp_audit"]   = ERPAudit()
+    _CACHE["erp_adapter"] = _make_erp_adapter(config.ERP["adapter"])
+    logger.info("[Startup] ERP adapter: %s (write_enabled=%s)",
+                config.ERP["adapter"], config.ERP["write_enabled"])
+
+    agent_task    = asyncio.create_task(_agent_loop())
+    listener_task = asyncio.create_task(
+        erp_listener_loop(
+            get_adapter       = lambda: _CACHE["erp_adapter"],
+            audit             = _CACHE["erp_audit"],
+            poll_interval_secs= config.ERP["poll_interval_secs"],
+        )
+    )
+    logger.info("[Startup] Always-on agent loop + ERP listener scheduled.")
     yield
     # ── shutdown ──────────────────────────────────────────────────────────────
-    task.cancel()
+    agent_task.cancel();    listener_task.cancel()
     try:
-        await task
+        await agent_task
     except asyncio.CancelledError:
-        logger.info("[Shutdown] Agent loop cancelled cleanly.")
+        pass
+    try:
+        await listener_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("[Shutdown] Agent loop and ERP listener cancelled cleanly.")
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="OPS//CORE Tactical Command API",
+    title="PROXIMA",
     description="Agentic Production Planning System — FastAPI Backend",
     version="2.0.0",
     lifespan=lifespan,
@@ -115,14 +161,20 @@ app.add_middleware(
 
 # ── Global state ──────────────────────────────────────────────────────────────
 _CACHE: dict = {
-    "orch_output":      None,
-    "df":               None,
-    "last_run_at":      None,
-    "is_running":       False,
-    "active_agent":     None,
-    "run_id":           None,
-    "run_started_at":   None,
-    "scenario_override": None,   # injected by /api/twin/apply-scenario
+    "orch_output":        None,
+    "df":                 None,
+    "last_run_at":        None,
+    "is_running":         False,
+    "active_agent":       None,
+    "run_id":             None,
+    "run_started_at":     None,
+    "scenario_override":  None,   # injected by /api/twin/apply-scenario
+    # ── ERP ──────────────────────────────────────────────────────────────────
+    "erp_adapter":        None,   # active ERPAdapter instance
+    "erp_audit":          None,   # ERPAudit singleton
+    "erp_last_poll":      None,   # ISO timestamp of last listener poll
+    "erp_pending_adapter": None,  # adapter name awaiting HITL approval
+    "erp_pending_hitl_id": None,  # hitl_queue row id for the pending switch
 }
 
 
@@ -203,6 +255,86 @@ def _recent_agent_log(limit: int = 8) -> list[dict]:
         return []
 
 
+def _push_scheduler_orders_to_erp(orch_result: dict, run_id: str):
+    """
+    After the orchestrator runs, push scheduler production orders and buyer
+    purchase orders to the active ERP adapter, logging each to erp_audit_log.
+    Duplicate pushes are suppressed via idempotency keys.
+    """
+    adapter = _CACHE.get("erp_adapter")
+    audit   = _CACHE.get("erp_audit")
+    if not adapter or not audit:
+        return
+
+    # ── Production orders from SchedulerAgent ────────────────────────────────
+    for plant, plan in orch_result.get("scheduler", {}).items():
+        for shift in plan.get("shift_plan", []):
+            shift_id = shift.get("shift_id", shift.get("facility", "?"))
+            ikey     = f"prod-{run_id[:8]}-{plant[:6]}-{str(shift_id)[:8]}"
+            if audit.is_duplicate(ikey):
+                continue
+            order = {
+                "plant":    plant,
+                "qty":      shift.get("qty", shift.get("expected_throughput", 0)),
+                "product":  shift.get("product", "PROD-001"),
+                "run_id":   run_id,
+                "shift_id": shift_id,
+            }
+            try:
+                resp = adapter.push_production_order(order)
+                audit.log(
+                    erp_type       = adapter.erp_type,
+                    action_type    = "WRITE_PROD_ORDER",
+                    document_id    = resp.get("doc_id"),
+                    idempotency_key= ikey,
+                    agent_name     = "Scheduler",
+                    run_id         = run_id,
+                    rationale      = plan.get("summary", ""),
+                    payload_before = order,
+                    payload_after  = resp,
+                )
+            except Exception as exc:
+                audit.log(
+                    erp_type       = adapter.erp_type,
+                    action_type    = "WRITE_PROD_ORDER",
+                    idempotency_key= ikey,
+                    agent_name     = "Scheduler",
+                    run_id         = run_id,
+                    rationale      = str(exc),
+                    status         = "error",
+                )
+
+    # ── Purchase orders from BuyerAgent ──────────────────────────────────────
+    for reorder in orch_result.get("buyer", {}).get("reorders", []):
+        fac   = reorder.get("facility", reorder.get("plant", "UNKNOWN"))
+        ikey  = f"po-{run_id[:8]}-{fac[:8]}"
+        if audit.is_duplicate(ikey):
+            continue
+        try:
+            resp = adapter.push_purchase_order(reorder)
+            audit.log(
+                erp_type       = adapter.erp_type,
+                action_type    = "WRITE_PO",
+                document_id    = resp.get("doc_id"),
+                idempotency_key= ikey,
+                agent_name     = "Buyer",
+                run_id         = run_id,
+                rationale      = reorder.get("reason", ""),
+                payload_before = reorder,
+                payload_after  = resp,
+            )
+        except Exception as exc:
+            audit.log(
+                erp_type       = adapter.erp_type,
+                action_type    = "WRITE_PO",
+                idempotency_key= ikey,
+                agent_name     = "Buyer",
+                run_id         = run_id,
+                rationale      = str(exc),
+                status         = "error",
+            )
+
+
 def _run_orchestrator_sync() -> dict:
     """Run orchestrator synchronously and update cache."""
     if _CACHE["is_running"]:
@@ -232,6 +364,14 @@ def _run_orchestrator_sync() -> dict:
         _CACHE["orch_output"] = result
         _CACHE["last_run_at"] = datetime.utcnow().isoformat()
         logger.info("Orchestrator run complete. Status: %s", result.get("final_status"))
+
+        # ── ERP write-back ────────────────────────────────────────────────────
+        if config.ERP.get("write_enabled"):
+            try:
+                _push_scheduler_orders_to_erp(result, new_run_id)
+            except Exception as erp_exc:
+                logger.error("[ERP] Write-back failed: %s", erp_exc, exc_info=True)
+
         return _json_safe(result)
     except Exception as exc:
         logger.error("Orchestrator run failed: %s", exc, exc_info=True)
@@ -884,7 +1024,172 @@ def get_coordination_thread(blocker_id: int):
     return _json_safe({"thread": thread})
 
 
+
+# ── ERP Integration Layer ─────────────────────────────────────────────────────
+
+@app.get("/api/erp/status")
+def get_erp_status():
+    """Active adapter type, connection health, write mode, and last poll time."""
+    adapter = _CACHE.get("erp_adapter")
+    pending = _CACHE.get("erp_pending_adapter")
+    if not adapter:
+        return {"erp_type": "none", "status": "not_initialized"}
+    health = adapter.health_check()
+    return _json_safe({
+        **health,
+        "write_enabled":    config.ERP["write_enabled"],
+        "poll_interval_secs": config.ERP["poll_interval_secs"],
+        "last_poll":        _CACHE.get("erp_last_poll"),
+        "pending_switch":   pending,                      # adapter awaiting HITL approval
+        "pending_hitl_id":  _CACHE.get("erp_pending_hitl_id"),
+    })
+
+
+@app.get("/api/erp/audit")
+def get_erp_audit(limit: int = 50, offset: int = 0):
+    """Paginated ERP audit log with rationale links back to Agent Reasoning."""
+    audit = _CACHE.get("erp_audit")
+    if not audit:
+        return {"rows": [], "total": 0}
+    rows = audit.get_audit_log(limit=limit, offset=offset)
+    return _json_safe({"rows": rows, "total": len(rows)})
+
+
+@app.get("/api/erp/audit/{audit_id}")
+def get_erp_audit_entry(audit_id: int):
+    """Single audit entry — full before/after JSON payload and explain URL."""
+    audit = _CACHE.get("erp_audit")
+    if not audit:
+        raise HTTPException(503, "ERP audit not initialized")
+    entry = audit.get_audit_entry(audit_id)
+    if not entry:
+        raise HTTPException(404, f"Audit entry {audit_id} not found")
+    return _json_safe(entry)
+
+
+@app.get("/api/erp/events")
+def get_erp_events(limit: int = 50):
+    """Recent ERP events received from poll_events()."""
+    audit = _CACHE.get("erp_audit")
+    if not audit:
+        return {"events": []}
+    return _json_safe({"events": audit.get_events(limit=limit)})
+
+
+class ErpSwitchRequest(BaseModel):
+    adapter: str   # "csv" | "sap_mock" | "odoo_mock"
+
+
+@app.post("/api/erp/switch")
+def request_erp_adapter_switch(req: ErpSwitchRequest):
+    """
+    Request an ERP adapter switch.
+
+    This does NOT switch immediately — it enqueues a HITL approval item.
+    The switch is only applied once a human approves it via /api/hitl/approve/{id}.
+
+    Returns the HITL item id so the frontend can deep-link to the HITL inbox.
+    """
+    allowed = {"csv", "sap_mock", "odoo_mock"}
+    if req.adapter not in allowed:
+        raise HTTPException(400, f"adapter must be one of {allowed}")
+
+    current_adapter = _CACHE.get("erp_adapter")
+    current_type    = current_adapter.erp_type if current_adapter else "unknown"
+
+    if current_type == req.adapter:
+        return {"status": "no_change", "erp_type": req.adapter,
+                "message": "Already using this adapter."}
+
+    # Enqueue a HITL approval item
+    hitl_payload = {
+        "action":           "erp_adapter_switch",
+        "current_adapter":  current_type,
+        "requested_adapter": req.adapter,
+        "message":          (
+            f"OPS//CORE is requesting to switch the ERP adapter from "
+            f"'{current_type}' to '{req.adapter}'. "
+            f"Approve to apply the change; reject to keep the current adapter."
+        ),
+        "write_enabled":    config.ERP["write_enabled"],
+    }
+    hitl_id = HitlManager().enqueue(
+        item_type="erp_switch",
+        source="ERP Integration Dashboard",
+        payload=hitl_payload,
+    )
+    if hitl_id < 0:
+        raise HTTPException(500, "Failed to enqueue HITL approval item")
+
+    # Store the pending switch in cache — applied in approve_hitl_item()
+    _CACHE["erp_pending_adapter"]  = req.adapter
+    _CACHE["erp_pending_hitl_id"]  = hitl_id
+
+    logger.info("[ERP] Switch request: %s → %s (HITL #%d)", current_type, req.adapter, hitl_id)
+    return _json_safe({
+        "status":           "pending_approval",
+        "hitl_id":          hitl_id,
+        "current_adapter":  current_type,
+        "requested_adapter": req.adapter,
+        "message":          f"Switch request queued as HITL item #{hitl_id}. Awaiting approval.",
+    })
+
+
+class ErpPushOrderRequest(BaseModel):
+    plant:   str
+    qty:     int
+    product: str = "PROD-001"
+
+
+@app.post("/api/erp/push-order")
+def manually_push_erp_order(req: ErpPushOrderRequest):
+    """Manually push a production order to the active ERP adapter."""
+    adapter = _CACHE.get("erp_adapter")
+    audit   = _CACHE.get("erp_audit")
+    if not adapter:
+        raise HTTPException(503, "ERP adapter not initialized")
+    ikey  = f"manual-{req.plant[:6]}-{uuid.uuid4().hex[:8]}"
+    order = {"plant": req.plant, "qty": req.qty, "product": req.product, "run_id": "manual"}
+    try:
+        resp = adapter.push_production_order(order)
+        audit.log(
+            erp_type       = adapter.erp_type,
+            action_type    = "MANUAL_PUSH",
+            document_id    = resp.get("doc_id"),
+            idempotency_key= ikey,
+            agent_name     = "ManualOperator",
+            rationale      = "Manual push from ERP Integration Dashboard",
+            payload_before = order,
+            payload_after  = resp,
+        )
+        return _json_safe(resp)
+    except Exception as exc:
+        audit.log(erp_type=adapter.erp_type, action_type="MANUAL_PUSH",
+                  idempotency_key=ikey, agent_name="ManualOperator",
+                  rationale=str(exc), status="error")
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/erp/inventory/{plant_id:path}")
+def get_erp_inventory(plant_id: str):
+    """Pull live inventory for a plant from the active ERP adapter."""
+    adapter = _CACHE.get("erp_adapter")
+    if not adapter:
+        raise HTTPException(503, "ERP adapter not initialized")
+    return _json_safe({"inventory": adapter.pull_inventory(plant_id), "erp_type": adapter.erp_type})
+
+
+@app.get("/api/erp/machines/{plant_id:path}")
+def get_erp_machines(plant_id: str):
+    """Pull live machine status for a plant from the active ERP adapter."""
+    adapter = _CACHE.get("erp_adapter")
+    if not adapter:
+        raise HTTPException(503, "ERP adapter not initialized")
+    return _json_safe({"machines": adapter.pull_machine_status(plant_id), "erp_type": adapter.erp_type})
+
+
 # ── HITL ──────────────────────────────────────────────────────────────────────
+
 
 @app.get("/api/hitl/counts")
 def get_hitl_counts():
@@ -908,6 +1213,18 @@ def approve_hitl_item(item_id: int, req: HitlActionRequest):
     ok = HitlManager().approve(item_id, comment=req.comment, approved_by=req.resolved_by)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Item {item_id} not found or already resolved")
+
+    # ── ERP switch approval gate ───────────────────────────────────────────
+    # If this HITL item was an ERP adapter switch request, apply it now.
+    if _CACHE.get("erp_pending_hitl_id") == item_id:
+        pending = _CACHE.pop("erp_pending_adapter", None)
+        _CACHE["erp_pending_hitl_id"] = None
+        if pending:
+            _CACHE["erp_adapter"] = _make_erp_adapter(pending)
+            logger.info("[ERP] Switch APPROVED — adapter now: %s", pending)
+            return {"status": "approved", "item_id": item_id,
+                    "erp_switch_applied": True, "erp_type": pending}
+
     return {"status": "approved", "item_id": item_id}
 
 
@@ -916,6 +1233,15 @@ def reject_hitl_item(item_id: int, req: HitlActionRequest):
     ok = HitlManager().reject(item_id, comment=req.comment, rejected_by=req.resolved_by)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Item {item_id} not found or already resolved")
+
+    # ── ERP switch rejection: clear pending switch ─────────────────────────
+    if _CACHE.get("erp_pending_hitl_id") == item_id:
+        rejected_adapter = _CACHE.pop("erp_pending_adapter", None)
+        _CACHE["erp_pending_hitl_id"] = None
+        logger.info("[ERP] Switch REJECTED — staying on current adapter. Rejected: %s", rejected_adapter)
+        return {"status": "rejected", "item_id": item_id,
+                "erp_switch_rejected": True, "rejected_adapter": rejected_adapter}
+
     return {"status": "rejected", "item_id": item_id}
 
 

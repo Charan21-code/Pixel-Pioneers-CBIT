@@ -17,7 +17,7 @@ DB_PATH  = os.path.join(BASE_DIR, "production.db")
 # ─────────────────────────────────────────────────────────────────────────────
 # Ollama (local LLM)
 # ─────────────────────────────────────────────────────────────────────────────
-OLLAMA_MODEL    = "gemma4:e2b"
+OLLAMA_MODEL    = "qwen2.5:3b"
 OLLAMA_URL      = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 OLLAMA_TIMEOUT  = 15.0   # seconds; keep short so fallback kicks in quickly
@@ -123,11 +123,22 @@ AGENT_LOOP = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ERP Integration Layer
+# ─────────────────────────────────────────────────────────────────────────────
+ERP = {
+    "adapter":                "sap_mock",  # "csv" | "sap_mock" | "odoo_mock"
+    "poll_interval_secs":     30,          # how often erp_listener polls for events
+    "write_enabled":          True,        # set False to disable all ERP writes
+    "idempotency_window_hrs": 24,          # duplicate-push suppression window
+    "audit_retention_days":   90,
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Frontend / UI
 # ─────────────────────────────────────────────────────────────────────────────
 UI = {
     "app": {
-        "brand_subtitle": "Tactical Command v2.0",
+        "brand_subtitle": "",
         "status_poll_ms": 15_000,
         "run_poll_startup_delay_ms": AGENT_LOOP["startup_delay_secs"] * 1000,
         "run_poll_interval_ms": 1_500,
@@ -216,6 +227,11 @@ UI = {
     "carbon": {
         "trend_window_days": 14,
         "max_energy_ticks": 7,
+    },
+    "erp": {
+        "default_adapter":  "sap_mock",   # shown in the ERP Integration banner
+        "poll_interval_ms": 30 * 1000,    # mirrors ERP["poll_interval_secs"]
+        "audit_display":    25,           # rows shown in the audit table
     },
     "digital_twin": {
         "optimise_options": DIGITAL_TWIN["optimise_options"],

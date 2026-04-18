@@ -3,35 +3,37 @@ import { BrowserRouter, Routes, Route, NavLink, useLocation } from 'react-router
 import {
   Factory, TrendingUp, Package, BarChart2, Wrench,
   DollarSign, Zap, Cpu, MessageSquare, GitBranch,
-  RefreshCw, Activity, AlertTriangle
+  RefreshCw, Activity, AlertTriangle, Database
 } from 'lucide-react'
 
 import * as api from './api/client'
-import CommandCenter        from './pages/CommandCenter'
-import DemandIntelligence   from './pages/DemandIntelligence'
-import HitlInbox            from './pages/HitlInbox'
-import CarbonEnergy         from './pages/CarbonEnergy'
-import InventoryLogistics   from './pages/InventoryLogistics'
-import ProductionPlan       from './pages/ProductionPlan'
-import MachineHealth        from './pages/MachineHealth'
-import FinanceDashboard     from './pages/FinanceDashboard'
-import NlpCommandPanel      from './pages/NlpCommandPanel'
-import DigitalTwin          from './pages/DigitalTwin'
-import AgentReasoning       from './pages/AgentReasoning'
+import CommandCenter from './pages/CommandCenter'
+import DemandIntelligence from './pages/DemandIntelligence'
+import HitlInbox from './pages/HitlInbox'
+import CarbonEnergy from './pages/CarbonEnergy'
+import InventoryLogistics from './pages/InventoryLogistics'
+import ProductionPlan from './pages/ProductionPlan'
+import MachineHealth from './pages/MachineHealth'
+import FinanceDashboard from './pages/FinanceDashboard'
+import NlpCommandPanel from './pages/NlpCommandPanel'
+import DigitalTwin from './pages/DigitalTwin'
+import AgentReasoning from './pages/AgentReasoning'
+import ERPIntegration from './pages/ERPIntegration'
 import { UiConfigProvider, useUiConfig } from './ui-config'
 
 const NAV = [
-  { path: '/',           label: 'Command Center',        pageTitle: 'Command Center',            Icon: Factory,       section: 'OVERVIEW' },
-  { path: '/demand',     label: 'Demand Intelligence',   pageTitle: 'Demand Intelligence',       Icon: TrendingUp,    section: 'ANALYTICS' },
-  { path: '/inventory',  label: 'Inventory & Logistics', pageTitle: 'Inventory & Logistics',     Icon: Package,       section: 'ANALYTICS' },
-  { path: '/production', label: 'Production Plan',       pageTitle: 'Production Master Plan',    Icon: BarChart2,     section: 'ANALYTICS' },
-  { path: '/machines',   label: 'Machine Health & OEE',  pageTitle: 'Machine Health & OEE',      Icon: Wrench,        section: 'ANALYTICS' },
-  { path: '/finance',    label: 'Finance Dashboard',     pageTitle: 'Finance Dashboard',         Icon: DollarSign,    section: 'ANALYTICS' },
-  { path: '/carbon',     label: 'Carbon & Energy',       pageTitle: 'Carbon & Energy',           Icon: Zap,           section: 'ANALYTICS' },
-  { path: '/twin',       label: 'Digital Twin',          pageTitle: 'Digital Twin Simulation',   Icon: Cpu,           section: 'SIMULATION' },
-  { path: '/nlp',        label: 'NLP Command Panel',     pageTitle: 'NLP Command Panel',         Icon: MessageSquare, section: 'CONTROL' },
+  { path: '/', label: 'Command Center', pageTitle: 'Command Center', Icon: Factory, section: 'OVERVIEW' },
+  { path: '/demand', label: 'Demand Intelligence', pageTitle: 'Demand Intelligence', Icon: TrendingUp, section: 'ANALYTICS' },
+  { path: '/inventory', label: 'Inventory & Logistics', pageTitle: 'Inventory & Logistics', Icon: Package, section: 'ANALYTICS' },
+  { path: '/production', label: 'Production Plan', pageTitle: 'Production Master Plan', Icon: BarChart2, section: 'ANALYTICS' },
+  { path: '/machines', label: 'Machine Health & OEE', pageTitle: 'Machine Health & OEE', Icon: Wrench, section: 'ANALYTICS' },
+  { path: '/finance', label: 'Finance Dashboard', pageTitle: 'Finance Dashboard', Icon: DollarSign, section: 'ANALYTICS' },
+  { path: '/carbon', label: 'Carbon & Energy', pageTitle: 'Carbon & Energy', Icon: Zap, section: 'ANALYTICS' },
+  { path: '/twin', label: 'Digital Twin', pageTitle: 'Digital Twin Simulation', Icon: Cpu, section: 'SIMULATION' },
+  { path: '/erp', label: 'ERP Integration', pageTitle: 'ERP Integration Layer', Icon: Database, section: 'INTEGRATION' },
+  { path: '/nlp', label: 'NLP Command Panel', pageTitle: 'NLP Command Panel', Icon: MessageSquare, section: 'CONTROL' },
   { path: '/agent-reasoning', label: 'Agent Reasoning', pageTitle: 'Agent Reasoning Pipeline', Icon: Activity, section: 'CONTROL' },
-  { path: '/hitl',       label: 'HITL Inbox',            pageTitle: 'HITL Inbox',                Icon: GitBranch,     section: 'CONTROL' },
+  { path: '/hitl', label: 'HITL Inbox', pageTitle: 'HITL Inbox', Icon: GitBranch, section: 'CONTROL' },
 ]
 
 function StatusDot({ status }) {
@@ -42,7 +44,7 @@ function StatusDot({ status }) {
 function Sidebar({ status, hitlCount, onRun, running }) {
   const location = useLocation()
   const { uiConfig } = useUiConfig()
-  const brandSubtitle = uiConfig.app?.brand_subtitle || 'Tactical Command v2.0'
+  const brandSubtitle = uiConfig.app?.brand_subtitle || ''
 
   // Group nav items by section
   const sections = {}
@@ -54,7 +56,7 @@ function Sidebar({ status, hitlCount, onRun, running }) {
   return (
     <div className="sidebar">
       <div className="sidebar-brand">
-        <div className="sidebar-brand-title">OPS//CORE</div>
+        <div className="sidebar-brand-title">PROXIMA</div>
         <div className="sidebar-brand-sub">{brandSubtitle}</div>
       </div>
 
@@ -87,9 +89,9 @@ function Sidebar({ status, hitlCount, onRun, running }) {
       </nav>
 
       <div className="sidebar-footer">
-        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10, fontSize:12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, fontSize: 12 }}>
           <StatusDot status={status} />
-          <span style={{ color:'var(--text-secondary)' }}>
+          <span style={{ color: 'var(--text-secondary)' }}>
             {status === 'ALL_OK' ? 'All Systems Go' : status === 'NEEDS_HITL' ? 'Needs Review' : status === 'BLOCKED' ? 'Blocked' : 'No Data'}
           </span>
         </div>
@@ -98,7 +100,7 @@ function Sidebar({ status, hitlCount, onRun, running }) {
           onClick={onRun}
           disabled={running}
         >
-          {running ? <><RefreshCw size={14} style={{ animation:'spin 0.7s linear infinite' }} /> Running...</> : <><Activity size={14} /> Run All Agents</>}
+          {running ? <><RefreshCw size={14} style={{ animation: 'spin 0.7s linear infinite' }} /> Running...</> : <><Activity size={14} /> Run All Agents</>}
         </button>
       </div>
     </div>
@@ -111,10 +113,10 @@ function Topbar({ title, status, health, lastRun }) {
       <div className="topbar-left">
         <span className="topbar-title">{title}</span>
       </div>
-      <div className="topbar-right" style={{ fontSize:12, color:'var(--text-secondary)', gap:16, display:'flex', alignItems:'center' }}>
+      <div className="topbar-right" style={{ fontSize: 12, color: 'var(--text-secondary)', gap: 16, display: 'flex', alignItems: 'center' }}>
         {lastRun && <span>Updated: {new Date(lastRun).toLocaleTimeString()}</span>}
         {health != null && (
-          <span style={{ color: health >= 70 ? 'var(--green)' : health >= 40 ? 'var(--amber)' : 'var(--red)', fontFamily:'var(--font-mono)', fontWeight:600 }}>
+          <span style={{ color: health >= 70 ? 'var(--green)' : health >= 40 ? 'var(--amber)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
             ⬡ {health.toFixed(0)}/100
           </span>
         )}
@@ -132,8 +134,8 @@ function AppInner() {
   const location = useLocation()
   const { uiConfig } = useUiConfig()
   const [systemStatus, setSystemStatus] = useState({ final_status: 'UNKNOWN', system_health: 0, last_run_at: null })
-  const [hitlCount,    setHitlCount]    = useState(0)
-  const [running,      setRunning]      = useState(false)
+  const [hitlCount, setHitlCount] = useState(0)
+  const [running, setRunning] = useState(false)
 
   const appConfig = uiConfig.app || {}
   const statusPollMs = appConfig.status_poll_ms || 15000
@@ -149,11 +151,11 @@ function AppInner() {
       setSystemStatus(s)
       setRunning(s.is_running || false)
       statusData = s
-    } catch (_) {}
+    } catch (_) { }
     try {
       const c = await api.getHitlCounts()
       setHitlCount(c.total || 0)
-    } catch (_) {}
+    } catch (_) { }
     return statusData
   }, [])
 
@@ -211,17 +213,18 @@ function AppInner() {
         />
         <div className="page-body">
           <Routes>
-            <Route path="/"           element={<CommandCenter      onRunAgents={handleRun} running={running} />} />
-            <Route path="/demand"     element={<DemandIntelligence />} />
-            <Route path="/inventory"  element={<InventoryLogistics />} />
-            <Route path="/production" element={<ProductionPlan     />} />
-            <Route path="/machines"   element={<MachineHealth      />} />
-            <Route path="/finance"    element={<FinanceDashboard   />} />
-            <Route path="/carbon"     element={<CarbonEnergy       />} />
-            <Route path="/twin"       element={<DigitalTwin        />} />
-            <Route path="/nlp"        element={<NlpCommandPanel    />} />
+            <Route path="/" element={<CommandCenter onRunAgents={handleRun} running={running} />} />
+            <Route path="/demand" element={<DemandIntelligence />} />
+            <Route path="/inventory" element={<InventoryLogistics />} />
+            <Route path="/production" element={<ProductionPlan />} />
+            <Route path="/machines" element={<MachineHealth />} />
+            <Route path="/finance" element={<FinanceDashboard />} />
+            <Route path="/carbon" element={<CarbonEnergy />} />
+            <Route path="/twin" element={<DigitalTwin />} />
+            <Route path="/nlp" element={<NlpCommandPanel />} />
             <Route path="/agent-reasoning" element={<AgentReasoning />} />
-            <Route path="/hitl"       element={<HitlInbox onCountChange={setHitlCount} />} />
+            <Route path="/erp" element={<ERPIntegration />} />
+            <Route path="/hitl" element={<HitlInbox onCountChange={setHitlCount} />} />
           </Routes>
         </div>
       </div>

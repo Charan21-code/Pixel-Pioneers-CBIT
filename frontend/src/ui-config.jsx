@@ -3,7 +3,7 @@ import * as api from './api/client'
 
 export const DEFAULT_UI_CONFIG = {
   app: {
-    brand_subtitle: 'Tactical Command v2.0',
+    brand_subtitle: '',
     status_poll_ms: 15000,
     run_poll_startup_delay_ms: 2000,
     run_poll_interval_ms: 1500,
@@ -143,7 +143,7 @@ export function UiConfigProvider({ children }) {
         if (!alive || !config) return
         setUiConfig((current) => mergeUiConfig(current, config))
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => {
         if (alive) setLoading(false)
       })
