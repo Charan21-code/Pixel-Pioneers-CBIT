@@ -17,6 +17,7 @@ import MachineHealth        from './pages/MachineHealth'
 import FinanceDashboard     from './pages/FinanceDashboard'
 import NlpCommandPanel      from './pages/NlpCommandPanel'
 import DigitalTwin          from './pages/DigitalTwin'
+import AgentReasoning       from './pages/AgentReasoning'
 import { UiConfigProvider, useUiConfig } from './ui-config'
 
 const NAV = [
@@ -29,6 +30,7 @@ const NAV = [
   { path: '/carbon',     label: 'Carbon & Energy',       pageTitle: 'Carbon & Energy',           Icon: Zap,           section: 'ANALYTICS' },
   { path: '/twin',       label: 'Digital Twin',          pageTitle: 'Digital Twin Simulation',   Icon: Cpu,           section: 'SIMULATION' },
   { path: '/nlp',        label: 'NLP Command Panel',     pageTitle: 'NLP Command Panel',         Icon: MessageSquare, section: 'CONTROL' },
+  { path: '/agent-reasoning', label: 'Agent Reasoning', pageTitle: 'Agent Reasoning Pipeline', Icon: Activity, section: 'CONTROL' },
   { path: '/hitl',       label: 'HITL Inbox',            pageTitle: 'HITL Inbox',                Icon: GitBranch,     section: 'CONTROL' },
 ]
 
@@ -218,6 +220,7 @@ function AppInner() {
             <Route path="/carbon"     element={<CarbonEnergy       />} />
             <Route path="/twin"       element={<DigitalTwin        />} />
             <Route path="/nlp"        element={<NlpCommandPanel    />} />
+            <Route path="/agent-reasoning" element={<AgentReasoning />} />
             <Route path="/hitl"       element={<HitlInbox onCountChange={setHitlCount} />} />
           </Routes>
         </div>

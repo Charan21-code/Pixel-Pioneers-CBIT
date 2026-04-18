@@ -113,6 +113,7 @@ _CACHE: dict = {
     "df":           None,
     "last_run_at":  None,
     "is_running":   False,
+    "active_agent": None,   # name of the agent currently executing, or None
 }
 
 
@@ -199,6 +200,14 @@ def _run_orchestrator_sync() -> dict:
         return {"status": "already_running"}
 
     _CACHE["is_running"] = True
+    _CACHE["active_agent"] = None
+
+    def _progress(agent_name):
+        """Called by OrchestratorAgent.run() before each agent step."""
+        _CACHE["active_agent"] = agent_name   # None signals 'all done'
+        if agent_name:
+            logger.info("[AgentProgress] Now running: %s", agent_name)
+
     try:
         df = _load_df()
         if df.empty:
@@ -207,7 +216,7 @@ def _run_orchestrator_sync() -> dict:
         as_of_time = df["Timestamp"].max()
         context = {"df": df, "as_of_time": as_of_time}
         orch = OrchestratorAgent()
-        result = orch.run(context)
+        result = orch.run(context, progress_callback=_progress)
         _CACHE["orch_output"] = result
         _CACHE["last_run_at"] = datetime.utcnow().isoformat()
         logger.info("Orchestrator run complete. Status: %s", result.get("final_status"))
@@ -217,6 +226,7 @@ def _run_orchestrator_sync() -> dict:
         return {"error": str(exc)}
     finally:
         _CACHE["is_running"] = False
+        _CACHE["active_agent"] = None
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -308,7 +318,18 @@ def get_system_status():
         "plants":          out.get("plants", []),
         "last_run_at":     _CACHE.get("last_run_at"),
         "is_running":      _CACHE["is_running"],
+        "active_agent":    _CACHE["active_agent"],
     })
+
+
+@app.get("/api/agents/active")
+def get_active_agent():
+    """Returns which agent is currently executing (or None if idle)."""
+    return {
+        "is_running":   _CACHE["is_running"],
+        "active_agent": _CACHE["active_agent"],
+        "last_run_at":  _CACHE.get("last_run_at"),
+    }
 
 
 # ── Plants & Overview ─────────────────────────────────────────────────────────

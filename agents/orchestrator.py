@@ -1,30 +1,30 @@
 """
-agents/orchestrator.py — OrchestratorAgent
+agents/orchestrator.py ΓÇö OrchestratorAgent
 
 Responsibility
 --------------
 The central supervisor for the entire factory AI system.
 
 Run order (dependencies respected):
-  1. ForecasterAgent      → demand forecast + anomalies
-  2. MechanicAgent        → per-plant risk scores + blacklist
-  3. BuyerAgent           → inventory status + reorder list
-  4. EnvironmentalistAgent → carbon compliance
-  5. FinanceAgent         → budget snapshot + gate decision
-  6. SchedulerAgent       → per-plant 7-day shift plans (uses all above)
+  1. ForecasterAgent      ΓåÆ demand forecast + anomalies
+  2. MechanicAgent        ΓåÆ per-plant risk scores + blacklist
+  3. BuyerAgent           ΓåÆ inventory status + reorder list
+  4. EnvironmentalistAgent ΓåÆ carbon compliance
+  5. FinanceAgent         ΓåÆ budget snapshot + gate decision
+  6. SchedulerAgent       ΓåÆ per-plant 7-day shift plans (uses all above)
 
 After all agents run:
   7. Build per-plant inventory stats with lead time
   8. Detect cross-agent conflicts (schedule vs maintenance, etc.)
   9. Determine final system status (ALL_OK | NEEDS_HITL | BLOCKED)
   10. Escalate CRITICAL conflicts to hitl_queue
-  11. Compute global system health score (0–100)
+  11. Compute global system health score (0ΓÇô100)
   12. Return a rich unified output dict stored in st.session_state["orch_output"]
 
 Live-data contract
 ------------------
 Passes the pre-sliced DataFrame to every agent. Agents never query
-production_events directly — they all receive context["df"].
+production_events directly ΓÇö they all receive context["df"].
 """
 
 import logging
@@ -59,9 +59,9 @@ class OrchestratorAgent(BaseAgent):
     def __init__(self, db_path: str = config.DB_PATH):
         super().__init__("Orchestrator", db_path)
 
-    # ── Main entry point ──────────────────────────────────────────────────────
+    # ΓöÇΓöÇ Main entry point ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
-    def run(self, context: dict) -> dict:
+    def run(self, context: dict, progress_callback=None) -> dict:
         """
         Parameters
         ----------
@@ -78,12 +78,21 @@ class OrchestratorAgent(BaseAgent):
         df: pd.DataFrame = context.get("df", pd.DataFrame())
         as_of_time: pd.Timestamp = context.get("as_of_time", pd.Timestamp.now())
 
+        def _cb(name):
+            if progress_callback:
+                try:
+                    progress_callback(name)
+                except Exception:
+                    pass
+
         if df.empty:
+            _cb(None)
             return self._empty_result("No production data available.")
 
         plants: list[str] = sorted(df["Assigned_Facility"].unique().tolist())
 
-        # ── 1. ForecasterAgent ────────────────────────────────────────────────
+        # ΓöÇΓöÇ 1. ForecasterAgent ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        _cb("Forecaster")
         logger.info("[Orchestrator] Running ForecasterAgent...")
         try:
             forecast = ForecasterAgent(self.db_path).run(context)
@@ -92,7 +101,8 @@ class OrchestratorAgent(BaseAgent):
             forecast = self._empty_agent_result("Forecaster", exc)
         context["forecast"] = forecast
 
-        # ── 2. MechanicAgent ─────────────────────────────────────────────────
+        # ΓöÇΓöÇ 2. MechanicAgent ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        _cb("Mechanic")
         logger.info("[Orchestrator] Running MechanicAgent...")
         try:
             mechanic = MechanicAgent(self.db_path).run(context)
@@ -102,7 +112,8 @@ class OrchestratorAgent(BaseAgent):
                         "warning_facilities": [], "recommendations": [], "summary": str(exc)}
         context["mechanic"] = mechanic
 
-        # ── 3. BuyerAgent ────────────────────────────────────────────────────
+        # ΓöÇΓöÇ 3. BuyerAgent ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        _cb("Buyer")
         logger.info("[Orchestrator] Running BuyerAgent...")
         try:
             buyer = BuyerAgent(self.db_path).run(context)
@@ -112,7 +123,8 @@ class OrchestratorAgent(BaseAgent):
                      "facilities_checked": 0, "reorders_triggered": 0}
         context["buyer"] = buyer
 
-        # ── 4. EnvironmentalistAgent ──────────────────────────────────────────
+        # ΓöÇΓöÇ 4. EnvironmentalistAgent ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        _cb("Environmentalist")
         logger.info("[Orchestrator] Running EnvironmentalistAgent...")
         try:
             environ = EnvironmentalistAgent(self.db_path).run(context)
@@ -121,7 +133,8 @@ class OrchestratorAgent(BaseAgent):
             environ = self._empty_environ_result(exc)
         context["environ"] = environ
 
-        # ── 5. FinanceAgent ───────────────────────────────────────────────────
+        # ΓöÇΓöÇ 5. FinanceAgent ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        _cb("Finance")
         logger.info("[Orchestrator] Running FinanceAgent...")
         try:
             finance = FinanceAgent(self.db_path).run(context)
@@ -130,11 +143,12 @@ class OrchestratorAgent(BaseAgent):
             finance = {"budget_status": {}, "health_score": 50.0}
         context["finance"] = finance
 
-        # ── 6. Per-plant inventory analysis ───────────────────────────────────
+        # ΓöÇΓöÇ 6. Per-plant inventory analysis ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         logger.info("[Orchestrator] Computing per-plant inventory stats...")
         buyer_inventory = self._compute_inventory_stats(df, plants)
 
-        # ── 7. Per-plant SchedulerAgent ───────────────────────────────────────
+        # ΓöÇΓöÇ 7. Per-plant SchedulerAgent ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        _cb("Scheduler")
         logger.info("[Orchestrator] Running SchedulerAgent per plant...")
         scheduler_plans = {}
         for plant in plants:
@@ -157,16 +171,17 @@ class OrchestratorAgent(BaseAgent):
                     "available_facilities": [], "summary": str(exc),
                 }
 
-        # ── 8. Conflict detection ─────────────────────────────────────────────
+        # ΓöÇΓöÇ 8. Conflict detection ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        _cb("Orchestrator")
         conflicts = self._detect_conflicts(
             forecast, mechanic, buyer, finance,
             scheduler_plans, buyer_inventory
         )
 
-        # ── 9. Final system status ────────────────────────────────────────────
+        # ΓöÇΓöÇ 9. Final system status ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         final_status = self._determine_status(conflicts, finance)
 
-        # ── 10. HITL escalations ──────────────────────────────────────────────
+        # ΓöÇΓöÇ 10. HITL escalations ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         for conflict in conflicts:
             if conflict["severity"] == "CRITICAL":
                 try:
@@ -201,10 +216,10 @@ class OrchestratorAgent(BaseAgent):
             except Exception as exc:
                 logger.warning("[Orchestrator] Carbon HITL enqueue failed: %s", exc)
 
-        # ── 11. System health score ───────────────────────────────────────────
+        # ΓöÇΓöÇ 11. System health score ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         system_health = self._compute_health_score(mechanic, finance, environ, buyer_inventory)
 
-        # ── 12. Publish orchestrator summary ──────────────────────────────────
+        # ΓöÇΓöÇ 12. Publish orchestrator summary ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         n_critical = len([c for c in conflicts if c["severity"] == "CRITICAL"])
         n_warning  = len([c for c in conflicts if c["severity"] == "WARNING"])
         orch_msg = (
@@ -221,6 +236,9 @@ class OrchestratorAgent(BaseAgent):
         )
         logger.info("[Orchestrator] Run complete. %s", orch_msg)
 
+        # Signal all agents have finished
+        _cb(None)
+
         return {
             "forecast":        forecast,
             "mechanic":        mechanic,
@@ -231,12 +249,12 @@ class OrchestratorAgent(BaseAgent):
             "scheduler":       scheduler_plans,   # {plant: {shift_plan, utilisation_pct, ...}}
             "conflicts":       conflicts,
             "final_status":    final_status,       # "ALL_OK" | "NEEDS_HITL" | "BLOCKED"
-            "system_health":   system_health,      # 0–100
+            "system_health":   system_health,      # 0ΓÇô100
             "plants":          plants,
             "last_run_at":     pd.Timestamp.now(),
         }
 
-    # ── Per-plant inventory stats ─────────────────────────────────────────────
+    # ΓöÇΓöÇ Per-plant inventory stats ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     def _compute_inventory_stats(self, df: pd.DataFrame, plants: list) -> dict:
         """
@@ -329,7 +347,7 @@ class OrchestratorAgent(BaseAgent):
 
         return result
 
-    # ── Conflict detection ────────────────────────────────────────────────────
+    # ΓöÇΓöÇ Conflict detection ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     def _detect_conflicts(
         self,
@@ -420,7 +438,7 @@ class OrchestratorAgent(BaseAgent):
         if health_score < config.HITL.get("health_score_min", 50):
             conflicts.append({
                 "type":            "finance_health_gate",
-                "description":     f"Finance health score is {health_score:.1f}/100 — below minimum threshold ({config.HITL['health_score_min']}).",
+                "description":     f"Finance health score is {health_score:.1f}/100 ΓÇö below minimum threshold ({config.HITL['health_score_min']}).",
                 "severity":        "CRITICAL",
                 "involved_agents": ["Finance", "Orchestrator"],
                 "plant":           "All",
@@ -441,13 +459,13 @@ class OrchestratorAgent(BaseAgent):
 
         return conflicts
 
-    # ── Final status ──────────────────────────────────────────────────────────
+    # ΓöÇΓöÇ Final status ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     def _determine_status(self, conflicts: list, finance: dict) -> str:
         """
-        ALL_OK      → no conflicts
-        NEEDS_HITL  → at least one WARNING conflict
-        BLOCKED     → at least one CRITICAL conflict
+        ALL_OK      ΓåÆ no conflicts
+        NEEDS_HITL  ΓåÆ at least one WARNING conflict
+        BLOCKED     ΓåÆ at least one CRITICAL conflict
         """
         severities = {c["severity"] for c in conflicts}
         if "CRITICAL" in severities:
@@ -456,7 +474,7 @@ class OrchestratorAgent(BaseAgent):
             return "NEEDS_HITL"
         return "ALL_OK"
 
-    # ── Health score ──────────────────────────────────────────────────────────
+    # ΓöÇΓöÇ Health score ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     def _compute_health_score(
         self,
@@ -466,13 +484,13 @@ class OrchestratorAgent(BaseAgent):
         buyer_inventory: dict,
     ) -> float:
         """
-        Composite 0–100 score:
+        Composite 0ΓÇô100 score:
             Finance health   40%
             Machine health   30%
             Inventory health 20%
             Carbon compliance 10%
         """
-        # Finance component (0–100 from FinanceAgent)
+        # Finance component (0ΓÇô100 from FinanceAgent)
         finance_score = finance.get("health_score", 100.0)
 
         # Machine component: penalise critical/warning counts
@@ -506,7 +524,7 @@ class OrchestratorAgent(BaseAgent):
         )
         return round(max(0.0, min(100.0, composite)), 1)
 
-    # ── Fallback helpers ──────────────────────────────────────────────────────
+    # ΓöÇΓöÇ Fallback helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     def _empty_agent_result(self, agent_name: str, exc: Exception) -> dict:
         return {

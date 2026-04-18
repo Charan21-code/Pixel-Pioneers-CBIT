@@ -1,0 +1,261 @@
+/* AgentReasoning.css */
+.rp-page {
+  padding: 24px;
+}
+
+.rp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.rp-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.rp-subtitle {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.rp-status-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-card);
+}
+
+.rp-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.rp-graph-card {
+  background: var(--bg-card);
+  border: 1px solid var(--outline_soft);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02), inset 1px 0 0 var(--rim);
+}
+
+.rp-graph-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 20px;
+}
+
+.rp-graph-wrap {
+  position: relative;
+  padding: 20px;
+  overflow-x: auto;
+}
+
+.rp-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 220px);
+  gap: 24px;
+  position: relative;
+  z-index: 10;
+}
+
+.rp-node {
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  position: relative;
+  transition: all 0.2s ease;
+  min-height: 144px;
+  display: flex;
+  flex-direction: column;
+}
+
+.rp-node--active {
+  border-color: var(--node-color);
+  box-shadow: 0 0 16px var(--node-glow);
+  background: var(--bg-hover);
+}
+
+.rp-node-ring {
+  position: absolute;
+  top: -4px; left: -4px; right: -4px; bottom: -4px;
+  border: 1px solid var(--node-color);
+  border-radius: calc(var(--radius-md) + 4px);
+  opacity: 0.4;
+  animation: pulse-ring 2s infinite ease-out;
+  pointer-events: none;
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  100% { transform: scale(1.05); opacity: 0; }
+}
+
+.rp-node-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.rp-spin {
+  animation: spin 1s linear infinite;
+}
+
+.rp-node-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.rp-node-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.rp-node-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: auto;
+  align-self: flex-start;
+}
+
+.rp-node-badge.active { background: var(--node-glow); color: var(--node-color); }
+.rp-node-badge.done   { background: var(--green-glow); color: var(--green); }
+.rp-node-badge.idle   { background: rgba(139,154,176,0.12); color: var(--text-secondary); }
+
+.rp-node-thought {
+  margin-top: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(0,0,0,0.2);
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--outline_soft);
+  word-wrap: break-word;
+}
+
+.rp-terminal-card {
+  background: #101014;
+  border: 1px solid var(--outline_soft);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 300px;
+}
+
+.rp-terminal-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--surface_container_low);
+  border-bottom: 1px solid var(--outline_soft);
+}
+
+.rp-terminal-dots {
+  display: flex;
+  gap: 6px;
+  margin-right: 16px;
+}
+.rp-terminal-dots span {
+  width: 10px; height: 10px; border-radius: 50%; display: block;
+}
+
+.rp-terminal-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+
+.rp-terminal-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rp-log-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.rp-log-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  text-align: center;
+  margin-top: 40px;
+}
+
+.rp-log-entry {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.rp-log-ts {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.rp-log-agent {
+  font-weight: 600;
+  min-width: 130px;
+  flex-shrink: 0;
+}
+
+.rp-log-sep {
+  color: var(--border);
+}
+
+.rp-log-text {
+  color: var(--text-primary);
+  word-wrap: break-word;
+}
+
+.rp-cursor {
+  animation: blink 1s step-start infinite;
+  display: inline-block;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+@keyframes dash-flow {
+  to { stroke-dashoffset: -10; }
+}
+
+.rp-svg {
+  z-index: 1; 
+  /* Must be below nodes to not click steal, but visible */
+}

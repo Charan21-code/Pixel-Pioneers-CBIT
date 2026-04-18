@@ -28,6 +28,7 @@ export const getMachines      = ()          => api.get('/machines')
 export const getFinance       = ()          => api.get('/finance')
 export const getCarbon        = ()          => api.get('/carbon')
 export const getAgentLog      = (p={})      => api.get('/agents/log', { params: p })
+export const getActiveAgent   = ()          => api.get('/agents/active')
 
 export const getHitlCounts    = ()          => api.get('/hitl/counts')
 export const getHitlPending   = (t)         => api.get('/hitl/pending', { params: t ? { item_type: t } : {} })
