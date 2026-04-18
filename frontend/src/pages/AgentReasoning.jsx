@@ -13,37 +13,46 @@ import './AgentReasoning.css'
 // Top arc: Forecaster (left), Mechanic (center), Buyer (right)
 // Middle: Environmentalist (left), Finance (CENTER), Scheduler (right)
 // Bottom: Orchestrator (center below Finance)
+// px = horizontal centre as % of container width
+// py = vertical   centre as % of container height
+// Safe insets: cards are 192px wide × up to 170px tall.
+// At container ≈ 860px wide  × 560px tall:
+//   left col  centre  ≈ 160px  → right edge = 256px  ✓
+//   right col centre  ≈ 700px  → right edge = 796px  ✓
+//   top row   centre  ≈  84px  → top  edge  =  -1px  ✓
+//   mid row   centre  ≈ 280px  → bottom     = 367px  ✓
+//   orch      centre  ≈ 476px  → bottom     = 563px  ✓
 const AGENTS = [
-  { id: 'Forecaster',       label: 'Forecaster',       subtitle: 'Demand Intelligence',    Icon: Brain,        color: 'var(--cyan)',   glow: 'var(--cyan-glow)',   px: 16.5, py: 12 },
-  { id: 'Mechanic',         label: 'Mechanic',          subtitle: 'Machine Health',         Icon: Cpu,          color: 'var(--amber)',  glow: 'var(--amber-glow)',  px: 50,   py: 12 },
-  { id: 'Buyer',            label: 'Buyer',             subtitle: 'Procurement',            Icon: ShoppingCart, color: 'var(--green)',  glow: 'var(--green-glow)',  px: 83.5, py: 12 },
-  { id: 'Environmentalist', label: 'Environmentalist',  subtitle: 'Carbon & Energy',        Icon: Leaf,         color: 'var(--green)',  glow: 'var(--green-glow)',  px: 16.5, py: 50 },
-  { id: 'Finance',          label: 'Finance',           subtitle: 'Budget Gate',            Icon: DollarSign,   color: 'var(--amber)',  glow: 'var(--amber-glow)',  px: 50,   py: 50 },
-  { id: 'Scheduler',        label: 'Scheduler',         subtitle: 'Production Planning',    Icon: Calendar,     color: 'var(--purple)', glow: 'var(--purple-glow)', px: 83.5, py: 50 },
-  { id: 'Orchestrator',     label: 'Orchestrator',      subtitle: 'System Supervisor',      Icon: GitBranch,    color: 'var(--red)',    glow: 'var(--red-glow)',    px: 50,   py: 88 },
+  { id: 'Forecaster', label: 'Forecaster', subtitle: 'Demand Intelligence', Icon: Brain, color: 'var(--cyan)', glow: 'var(--cyan-glow)', px: 18.5, py: 15 },
+  { id: 'Mechanic', label: 'Mechanic', subtitle: 'Machine Health', Icon: Cpu, color: 'var(--amber)', glow: 'var(--amber-glow)', px: 50, py: 15 },
+  { id: 'Buyer', label: 'Buyer', subtitle: 'Procurement', Icon: ShoppingCart, color: 'var(--green)', glow: 'var(--green-glow)', px: 81.5, py: 15 },
+  { id: 'Environmentalist', label: 'Environmentalist', subtitle: 'Carbon & Energy', Icon: Leaf, color: 'var(--green)', glow: 'var(--green-glow)', px: 18.5, py: 50 },
+  { id: 'Finance', label: 'Finance', subtitle: 'Budget Gate', Icon: DollarSign, color: 'var(--amber)', glow: 'var(--amber-glow)', px: 50, py: 50 },
+  { id: 'Scheduler', label: 'Scheduler', subtitle: 'Production Planning', Icon: Calendar, color: 'var(--purple)', glow: 'var(--purple-glow)', px: 81.5, py: 50 },
+  { id: 'Orchestrator', label: 'Orchestrator', subtitle: 'System Supervisor', Icon: GitBranch, color: 'var(--red)', glow: 'var(--red-glow)', px: 50, py: 85 },
 ]
 
 // Connections between agents by id
 const CONNECTIONS = [
-  ['Forecaster',       'Mechanic'],        // top-row horizontal
-  ['Mechanic',         'Buyer'],           // top-row horizontal
-  ['Forecaster',       'Environmentalist'],// Forecaster  → Environ
-  ['Mechanic',         'Finance'],         // Mechanic    → Finance
-  ['Buyer',            'Scheduler'],       // Buyer       → Scheduler
+  ['Forecaster', 'Mechanic'],        // top-row horizontal
+  ['Mechanic', 'Buyer'],           // top-row horizontal
+  ['Forecaster', 'Environmentalist'],// Forecaster  → Environ
+  ['Mechanic', 'Finance'],         // Mechanic    → Finance
+  ['Buyer', 'Scheduler'],       // Buyer       → Scheduler
   ['Environmentalist', 'Finance'],         // Environ     → Finance
-  ['Buyer',            'Finance'],         // Buyer       → Finance (clearance)
-  ['Finance',          'Scheduler'],       // Finance     → Scheduler
-  ['Finance',          'Orchestrator'],    // Finance     → Orchestrator
-  ['Scheduler',        'Orchestrator'],    // Scheduler   → Orchestrator
+  ['Buyer', 'Finance'],         // Buyer       → Finance (clearance)
+  ['Finance', 'Scheduler'],       // Finance     → Scheduler
+  ['Finance', 'Orchestrator'],    // Finance     → Orchestrator
+  ['Scheduler', 'Orchestrator'],    // Scheduler   → Orchestrator
 ]
 
 /* ── Msg type config ─────────────────────────────────────────────────────── */
 const MSG_CFG = {
-  blocker:   { label: 'BLOCKER',   color: 'var(--red)',    bg: 'rgba(239,68,68,0.08)',   icon: AlertTriangle },
-  proposal:  { label: 'PROPOSAL',  color: 'var(--amber)',  bg: 'rgba(251,191,36,0.08)',  icon: TrendingUp },
-  eval:      { label: 'EVAL',      color: 'var(--cyan)',   bg: 'rgba(34,211,238,0.08)',  icon: Zap },
-  consensus: { label: 'CONSENSUS', color: 'var(--green)',  bg: 'rgba(34,197,94,0.08)',   icon: CheckCircle },
-  escalate:  { label: 'ESCALATED', color: 'var(--purple)', bg: 'rgba(168,85,247,0.08)', icon: GitBranch },
+  blocker: { label: 'BLOCKER', color: 'var(--red)', bg: 'rgba(239,68,68,0.08)', icon: AlertTriangle },
+  proposal: { label: 'PROPOSAL', color: 'var(--amber)', bg: 'rgba(251,191,36,0.08)', icon: TrendingUp },
+  eval: { label: 'EVAL', color: 'var(--cyan)', bg: 'rgba(34,211,238,0.08)', icon: Zap },
+  consensus: { label: 'CONSENSUS', color: 'var(--green)', bg: 'rgba(34,197,94,0.08)', icon: CheckCircle },
+  escalate: { label: 'ESCALATED', color: 'var(--purple)', bg: 'rgba(168,85,247,0.08)', icon: GitBranch },
 }
 
 /* ── Node card dimensions ────────────────────────────────────────────────── */
@@ -54,7 +63,7 @@ const NODE_H = 130  // card height (must match CSS .rp-node min-height)
 function AgentNode({ agent, state, lastThought, hasBlocker }) {
   const { label, subtitle, Icon, color, glow } = agent
   const isActive = state === 'thinking'
-  const isDone   = state === 'done'
+  const isDone = state === 'done'
 
   return (
     <div
@@ -66,8 +75,8 @@ function AgentNode({ agent, state, lastThought, hasBlocker }) {
 
       <div className="rp-node-icon-wrap">
         <Icon size={20} style={{ color }} />
-        {isActive  && <Loader2 size={12} className="rp-spin" style={{ color, marginLeft: 4 }} />}
-        {isDone    && <CheckCircle size={12} style={{ color: 'var(--green)', marginLeft: 4 }} />}
+        {isActive && <Loader2 size={12} className="rp-spin" style={{ color, marginLeft: 4 }} />}
+        {isDone && <CheckCircle size={12} style={{ color: 'var(--green)', marginLeft: 4 }} />}
         {!isActive && !isDone && <Clock size={12} style={{ color: 'var(--text-muted)', marginLeft: 4 }} />}
       </div>
 
@@ -94,8 +103,8 @@ function Connector({ x1, y1, x2, y2, active, blocked }) {
   const mx = (x1 + x2) / 2
 
   const stroke = blocked ? 'var(--red)' : active ? 'var(--primary)' : 'var(--border)'
-  const width  = (active || blocked) ? 2.5 : 1.5
-  const dash   = (active || blocked) ? '6 4' : '4 4'
+  const width = (active || blocked) ? 2.5 : 1.5
+  const dash = (active || blocked) ? '6 4' : '4 4'
 
   return (
     <path
@@ -135,18 +144,18 @@ function CoordCard({ msg, onClick }) {
         </span>
         <span className="rp-coord-ts">{ts}</span>
         <span className="rp-coord-from">{msg.from_agent}</span>
-        {msg.to_agent && !['All','HITL'].includes(
+        {msg.to_agent && !['All', 'HITL'].includes(
           Array.isArray(msg.to_agent) ? msg.to_agent[0] : msg.to_agent
         ) && (
-          <>
-            <ChevronRight size={10} style={{ color: 'var(--text-muted)' }} />
-            <span className="rp-coord-to">
-              {Array.isArray(msg.to_agent)
-                ? msg.to_agent.join(', ')
-                : String(msg.to_agent).replace(/[\[\]"]/g, '')}
-            </span>
-          </>
-        )}
+            <>
+              <ChevronRight size={10} style={{ color: 'var(--text-muted)' }} />
+              <span className="rp-coord-to">
+                {Array.isArray(msg.to_agent)
+                  ? msg.to_agent.join(', ')
+                  : String(msg.to_agent).replace(/[\[\]"]/g, '')}
+              </span>
+            </>
+          )}
       </div>
       <div className="rp-coord-subject">{msg.subject}</div>
 
@@ -231,7 +240,7 @@ function LogEntry({ entry, isLast }) {
 
 /* ── Main Page ───────────────────────────────────────────────────────────── */
 export default function AgentReasoning() {
-  const logRef   = useRef(null)
+  const logRef = useRef(null)
   const graphRef = useRef(null)
   const [graphSize, setGraphSize] = useState({ w: 800, h: 520 })
 
@@ -248,16 +257,16 @@ export default function AgentReasoning() {
     return () => obs.disconnect()
   }, [])
 
-  const [logs,          setLogs]          = useState([])
-  const [agentStates,   setAgentStates]   = useState({})
+  const [logs, setLogs] = useState([])
+  const [agentStates, setAgentStates] = useState({})
   const [agentThoughts, setAgentThoughts] = useState({})
-  const [connected,     setConnected]     = useState(false)
-  const [isRunning,     setIsRunning]     = useState(false)
-  const [currentRunId,  setCurrentRunId]  = useState(null)
-  const [coordMsgs,     setCoordMsgs]     = useState([])
-  const [blockerIds,    setBlockerIds]    = useState(new Set())
-  const [drawerOpen,    setDrawerOpen]    = useState(false)
-  const [drawerThread,  setDrawerThread]  = useState(null)
+  const [connected, setConnected] = useState(false)
+  const [isRunning, setIsRunning] = useState(false)
+  const [currentRunId, setCurrentRunId] = useState(null)
+  const [coordMsgs, setCoordMsgs] = useState([])
+  const [blockerIds, setBlockerIds] = useState(new Set())
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [drawerThread, setDrawerThread] = useState(null)
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
@@ -272,9 +281,9 @@ export default function AgentReasoning() {
 
       setConnected(true)
 
-      const running     = activeData?.is_running ?? false
+      const running = activeData?.is_running ?? false
       const activeAgent = activeData?.active_agent ?? null
-      const runId       = activeData?.run_id ?? null
+      const runId = activeData?.run_id ?? null
 
       setIsRunning(running)
 
@@ -298,9 +307,9 @@ export default function AgentReasoning() {
 
       const newLogs = rawItems.slice().reverse().map(item => ({
         agent: item.agent_name || 'System',
-        ts:    item.logged_at,
-        text:  item.message,
-        type:  'token',
+        ts: item.logged_at,
+        text: item.message,
+        type: 'token',
       }))
       setLogs(newLogs)
 
@@ -314,9 +323,9 @@ export default function AgentReasoning() {
       const agentsWithLogs = new Set(rawItems.map(i => i.agent_name))
       const states = {}
       AGENTS.forEach(a => {
-        if (activeAgent === a.id)        states[a.id] = 'thinking'
+        if (activeAgent === a.id) states[a.id] = 'thinking'
         else if (agentsWithLogs.has(a.id)) states[a.id] = 'done'
-        else                               states[a.id] = 'idle'
+        else states[a.id] = 'idle'
       })
       setAgentStates(states)
 
@@ -360,12 +369,12 @@ export default function AgentReasoning() {
 
   const statusLabel = !connected ? 'Offline' : isRunning ? 'Agents Running' : 'Live'
   const statusColor = !connected ? 'var(--error)' : isRunning ? 'var(--amber)' : 'var(--green)'
-  const statusGlow  = !connected ? 'var(--error-glow)' : isRunning ? 'var(--amber-glow)' : 'var(--green-glow)'
+  const statusGlow = !connected ? 'var(--error-glow)' : isRunning ? 'var(--amber-glow)' : 'var(--green-glow)'
 
-  const blockers  = coordMsgs.filter(m => m.msg_type === 'blocker')
+  const blockers = coordMsgs.filter(m => m.msg_type === 'blocker')
   const proposals = coordMsgs.filter(m => m.msg_type === 'proposal')
-  const evals     = coordMsgs.filter(m => m.msg_type === 'eval')
-  const outcomes  = coordMsgs.filter(m => m.msg_type === 'consensus' || m.msg_type === 'escalate')
+  const evals = coordMsgs.filter(m => m.msg_type === 'eval')
+  const outcomes = coordMsgs.filter(m => m.msg_type === 'consensus' || m.msg_type === 'escalate')
   const allOrdered = [...blockers, ...proposals, ...evals, ...outcomes]
 
   const blockerAgentIds = new Set(blockers.filter(m => m.status === 'open').map(m => m.from_agent))
@@ -409,13 +418,13 @@ export default function AgentReasoning() {
             </defs>
             {CONNECTIONS.map(([fromId, toId], i) => {
               const fromAgent = AGENTS.find(a => a.id === fromId)
-              const toAgent   = AGENTS.find(a => a.id === toId)
+              const toAgent = AGENTS.find(a => a.id === toId)
               if (!fromAgent || !toAgent) return null
               const x1 = (fromAgent.px / 100) * graphSize.w
               const y1 = (fromAgent.py / 100) * graphSize.h
-              const x2 = (toAgent.px   / 100) * graphSize.w
-              const y2 = (toAgent.py   / 100) * graphSize.h
-              const isActive  = agentStates[fromAgent.id] === 'thinking'
+              const x2 = (toAgent.px / 100) * graphSize.w
+              const y2 = (toAgent.py / 100) * graphSize.h
+              const isActive = agentStates[fromAgent.id] === 'thinking'
               const isBlocked = blockerAgentIds.has(fromAgent.id)
               return (
                 <Connector key={i}
@@ -433,7 +442,7 @@ export default function AgentReasoning() {
               style={{
                 position: 'absolute',
                 left: `calc(${agent.px}% - ${NODE_W / 2}px)`,
-                top:  `calc(${agent.py}% - ${NODE_H / 2}px)`,
+                top: `calc(${agent.py}% - ${NODE_H / 2}px)`,
                 zIndex: 2,
               }}
             >
@@ -510,7 +519,7 @@ export default function AgentReasoning() {
           <div className="rp-drawer" onClick={e => e.stopPropagation()}>
             <div className="rp-drawer-header">
               <span>Negotiation Thread</span>
-              <button className="rp-drawer-close" onClick={() => setDrawerOpen(false)}><X size={16}/></button>
+              <button className="rp-drawer-close" onClick={() => setDrawerOpen(false)}><X size={16} /></button>
             </div>
             <div className="rp-drawer-body">
               {(drawerThread || []).map((msg, i) => (
