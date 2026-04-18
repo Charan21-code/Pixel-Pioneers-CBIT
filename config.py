@@ -18,8 +18,8 @@ DB_PATH  = os.path.join(BASE_DIR, "production.db")
 # Ollama (local LLM)
 # ─────────────────────────────────────────────────────────────────────────────
 OLLAMA_MODEL    = "qwen2.5:3b"
-OLLAMA_URL      = "http://localhost:11434/api/generate"
-OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
+OLLAMA_URL      = "http://192.168.137.97:11434/api/generate"
+OLLAMA_TAGS_URL = "http://192.168.137.97:11434/api/tags"
 OLLAMA_TIMEOUT  = 15.0   # seconds; keep short so fallback kicks in quickly
 
 # ─────────────────────────────────────────────────────────────────────────────

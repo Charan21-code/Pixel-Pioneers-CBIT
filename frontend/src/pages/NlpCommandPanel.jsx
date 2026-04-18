@@ -16,11 +16,11 @@ const SUGGESTED = [
 ]
 
 const INTENT_COLORS = {
-  query:       'var(--cyan)',
-  approve:     'var(--green)',
-  reject:      'var(--red)',
-  escalate:    'var(--amber)',
-  simulate:    'var(--purple)',
+  query: 'var(--cyan)',
+  approve: 'var(--green)',
+  reject: 'var(--red)',
+  escalate: 'var(--amber)',
+  simulate: 'var(--purple)',
   reconfigure: 'var(--amber)',
 }
 
@@ -36,7 +36,7 @@ function Message({ msg }) {
           {msg.content}
         </div>
         {msg.meta && (
-          <div className="chat-meta" style={{ display:'flex', gap:10, flexWrap:'wrap', paddingLeft:4 }}>
+          <div className="chat-meta" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', paddingLeft: 4 }}>
             {msg.meta.intent && (
               <span style={{ color: INTENT_COLORS[msg.meta.intent] || 'var(--text-muted)' }}>
                 Intent: {msg.meta.intent}
@@ -47,7 +47,7 @@ function Message({ msg }) {
               <span>Confidence: {msg.meta.confidence_pct}%</span>
             )}
             {msg.meta.action_result?.action_taken && (
-              <span style={{ color:'var(--green)' }}>✅ {msg.meta.action_result.action_taken}</span>
+              <span style={{ color: 'var(--green)' }}>✅ {msg.meta.action_result.action_taken}</span>
             )}
             <span>{new Date(msg.ts).toLocaleTimeString()}</span>
           </div>
@@ -58,27 +58,27 @@ function Message({ msg }) {
 }
 
 export default function NlpCommandPanel() {
-  const [messages,  setMessages]  = useState([{
+  const [messages, setMessages] = useState([{
     role: 'assistant',
     content: '🤖 OPS//CORE Tactical AI online. Ask me anything about the production system, or give me a command to approve/reject HITL items, escalate issues, or run simulations.',
     ts: Date.now(),
   }])
-  const [input,     setInput]     = useState('')
-  const [loading,   setLoading]   = useState(false)
-  const [plants,    setPlants]    = useState([])
-  const [selPlant,  setSelPlant]  = useState('')
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [plants, setPlants] = useState([])
+  const [selPlant, setSelPlant] = useState('')
   const [ollamaOnline, setOllamaOnline] = useState(null)  // null=checking, true=online, false=offline
   const endRef = useRef(null)
 
   useEffect(() => {
-    api.getPlants().then(d => setPlants(d.plants?.map(p=>p.name) || [])).catch(()=>{})
+    api.getPlants().then(d => setPlants(d.plants?.map(p => p.name) || [])).catch(() => { })
   }, [])
 
   // Ping Ollama availability via backend health
   useEffect(() => {
     const checkOllama = async () => {
       try {
-        const res = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(3000) })
+        const res = await fetch('http://192.168.137.97:11434/api/tags', { signal: AbortSignal.timeout(3000) })
         setOllamaOnline(res.ok)
       } catch {
         setOllamaOnline(false)
@@ -90,12 +90,12 @@ export default function NlpCommandPanel() {
   }, [])
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior:'smooth' })
+    endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   const send = useCallback(async (query) => {
     if (!query.trim()) return
-    const userMsg = { role:'user', content: query, ts: Date.now() }
+    const userMsg = { role: 'user', content: query, ts: Date.now() }
     setMessages(prev => [...prev, userMsg])
     setInput('')
     setLoading(true)
@@ -103,23 +103,23 @@ export default function NlpCommandPanel() {
     try {
       const res = await api.nlpQuery({ query, selected_plant: selPlant || undefined })
       const assistMsg = {
-        role:    'assistant',
+        role: 'assistant',
         content: res.response || 'No response generated.',
-        ts:      Date.now(),
-        meta:    {
-          intent:        res.intent,
-          agent:         res.agent,
+        ts: Date.now(),
+        meta: {
+          intent: res.intent,
+          agent: res.agent,
           confidence_pct: res.confidence_pct,
-          params:        res.params,
+          params: res.params,
           action_result: res.action_result,
         },
       }
       setMessages(prev => [...prev, assistMsg])
     } catch (e) {
       setMessages(prev => [...prev, {
-        role:    'assistant',
+        role: 'assistant',
         content: `⚠️ Error: ${e.message}`,
-        ts:      Date.now(),
+        ts: Date.now(),
       }])
     } finally {
       setLoading(false)
@@ -133,17 +133,17 @@ export default function NlpCommandPanel() {
   return (
     <div>
       {/* Header controls */}
-      <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:16, flexWrap:'wrap' }}>
-        <div style={{ flex:1, minWidth:200 }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
           <label className="form-label">Context Plant (optional)</label>
-          <select className="input" value={selPlant} onChange={e=>setSelPlant(e.target.value)}>
+          <select className="input" value={selPlant} onChange={e => setSelPlant(e.target.value)}>
             <option value="">All Plants</option>
             {plants.map(p => <option key={p} value={p}>{p.split('(')[0].trim()}</option>)}
           </select>
         </div>
-        <div style={{ marginTop:20 }}>
+        <div style={{ marginTop: 20 }}>
           <button className="btn btn-ghost btn-sm" onClick={() => setMessages([{
-            role:'assistant', content:'🤖 Conversation cleared. How can I help?', ts: Date.now()
+            role: 'assistant', content: '🤖 Conversation cleared. How can I help?', ts: Date.now()
           }])}>
             <RefreshCw size={13} /> Clear
           </button>
@@ -151,20 +151,20 @@ export default function NlpCommandPanel() {
       </div>
 
       {/* Info */}
-      <div className="info-box" style={{ marginBottom:16, display:'flex', gap:12, alignItems:'flex-start', flexWrap:'wrap' }}>
-        <div style={{ flex:1 }}>
+      <div className="info-box" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1 }}>
           <b>💡 Supported commands:</b> Ask questions about any agent, approve/reject HITL items, escalate issues, or query system status.
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, whiteSpace:'nowrap' }}>
-          {ollamaOnline === null && <span style={{ color:'var(--text-muted)' }}>🔄 Checking LLM...</span>}
-          {ollamaOnline === true  && <span style={{ color:'var(--green)', fontWeight:600 }}>🟢 Ollama LLM Online — rich AI responses active</span>}
-          {ollamaOnline === false && <span style={{ color:'var(--amber)', fontWeight:600 }}>🟡 Ollama offline — using smart heuristic responses</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, whiteSpace: 'nowrap' }}>
+          {ollamaOnline === null && <span style={{ color: 'var(--text-muted)' }}>🔄 Checking LLM...</span>}
+          {ollamaOnline === true && <span style={{ color: 'var(--green)', fontWeight: 600 }}>🟢 Ollama LLM Online — rich AI responses active</span>}
+          {ollamaOnline === false && <span style={{ color: 'var(--amber)', fontWeight: 600 }}>🟡 Ollama offline — using smart heuristic responses</span>}
         </div>
       </div>
 
       {/* Suggested Queries */}
-      <div style={{ marginBottom:14 }}>
-        <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:8, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.06em' }}>
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
           Quick Commands
         </div>
         <div className="tag-list">
@@ -172,7 +172,7 @@ export default function NlpCommandPanel() {
             <button
               key={i}
               className="tag"
-              style={{ cursor:'pointer', transition:'all 0.15s' }}
+              style={{ cursor: 'pointer', transition: 'all 0.15s' }}
               onClick={() => send(s)}
             >
               {s}
@@ -188,8 +188,8 @@ export default function NlpCommandPanel() {
           {loading && (
             <div className="chat-msg assistant">
               <div className="chat-avatar assist">🤖</div>
-              <div className="chat-bubble assist" style={{ display:'flex', gap:8, alignItems:'center' }}>
-                <div className="spinner" style={{ width:14, height:14, borderWidth:2 }} />
+              <div className="chat-bubble assist" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
                 Processing command...
               </div>
             </div>
@@ -200,7 +200,7 @@ export default function NlpCommandPanel() {
         <div className="chat-input-row">
           <input
             className="input"
-            style={{ flex:1, fontSize:13 }}
+            style={{ flex: 1, fontSize: 13 }}
             placeholder="Ask a question or give a command... (Enter to send)"
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -218,21 +218,21 @@ export default function NlpCommandPanel() {
       </div>
 
       {/* Command Reference */}
-      <div className="two-col" style={{ marginTop:20 }}>
+      <div className="two-col" style={{ marginTop: 20 }}>
         <div className="card">
           <div className="card-header"><div className="card-title">📖 Command Reference</div></div>
           {[
-            ['Query',      'var(--cyan)',   'What is the system health? / Show demand forecast'],
-            ['Approve',    'var(--green)',  'Approve item #3 / Approve pending procurement'],
-            ['Reject',     'var(--red)',    'Reject item #5 because over budget'],
-            ['Escalate',   'var(--amber)',  'Escalate machine alert at Plant A to HITL'],
-            ['Simulate',   'var(--purple)', 'What if Plant B has 6 hours downtime?'],
-            ['Reconfigure','var(--amber)',  'Set workforce to 80% at Foxconn'],
+            ['Query', 'var(--cyan)', 'What is the system health? / Show demand forecast'],
+            ['Approve', 'var(--green)', 'Approve item #3 / Approve pending procurement'],
+            ['Reject', 'var(--red)', 'Reject item #5 because over budget'],
+            ['Escalate', 'var(--amber)', 'Escalate machine alert at Plant A to HITL'],
+            ['Simulate', 'var(--purple)', 'What if Plant B has 6 hours downtime?'],
+            ['Reconfigure', 'var(--amber)', 'Set workforce to 80% at Foxconn'],
           ].map(([intent, color, example]) => (
             <div key={intent} className="stat-row">
               <span>
-                <span style={{ color, fontWeight:600, fontSize:12, fontFamily:'var(--font-mono)' }}>[{intent}]</span>
-                <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:8 }}>{example}</span>
+                <span style={{ color, fontWeight: 600, fontSize: 12, fontFamily: 'var(--font-mono)' }}>[{intent}]</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>{example}</span>
               </span>
             </div>
           ))}
@@ -240,16 +240,16 @@ export default function NlpCommandPanel() {
 
         <div className="card">
           <div className="card-header"><div className="card-title">🎯 Intent Detection</div></div>
-          <div style={{ fontSize:12, color:'var(--text-secondary)', lineHeight:1.8 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
             <p>The system uses a <b>heuristic intent parser</b> that understands:</p>
-            <ul style={{ marginTop:8, paddingLeft:16 }}>
+            <ul style={{ marginTop: 8, paddingLeft: 16 }}>
               <li>Plant/facility references (partial names ok)</li>
               <li>Numeric quantities and percentages</li>
               <li>HITL item IDs (e.g. "item #3")</li>
               <li>Action keywords (approve, reject, escalate)</li>
               <li>Domain keywords (finance, carbon, maintenance...)</li>
             </ul>
-            <p style={{ marginTop:8 }}>When Ollama is active, responses use LLM reasoning for richer answers.</p>
+            <p style={{ marginTop: 8 }}>When Ollama is active, responses use LLM reasoning for richer answers.</p>
           </div>
         </div>
       </div>

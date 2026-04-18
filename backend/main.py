@@ -1209,40 +1209,131 @@ def get_hitl_history(limit: int = 50, item_type: Optional[str] = None):
 
 
 @app.post("/api/hitl/approve/{item_id}")
-def approve_hitl_item(item_id: int, req: HitlActionRequest):
-    ok = HitlManager().approve(item_id, comment=req.comment, approved_by=req.resolved_by)
+def approve_hitl_item(item_id: int, req: HitlActionRequest, background_tasks: BackgroundTasks):
+    hm = HitlManager()
+
+    # Fetch the item before resolving so we can build a coordination message
+    pending_items = hm.get_pending()
+    resolved_item = next((i for i in pending_items if i["id"] == item_id), None)
+
+    ok = hm.approve(item_id, comment=req.comment, approved_by=req.resolved_by)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Item {item_id} not found or already resolved")
 
     # ── ERP switch approval gate ───────────────────────────────────────────
-    # If this HITL item was an ERP adapter switch request, apply it now.
+    erp_switch_applied = False
     if _CACHE.get("erp_pending_hitl_id") == item_id:
         pending = _CACHE.pop("erp_pending_adapter", None)
         _CACHE["erp_pending_hitl_id"] = None
         if pending:
             _CACHE["erp_adapter"] = _make_erp_adapter(pending)
             logger.info("[ERP] Switch APPROVED — adapter now: %s", pending)
-            return {"status": "approved", "item_id": item_id,
-                    "erp_switch_applied": True, "erp_type": pending}
+            erp_switch_applied = True
 
-    return {"status": "approved", "item_id": item_id}
+    # ── Post a coordination-bus consensus message so AgentReasoning sees it ─
+    run_id = _CACHE.get("run_id")
+    if run_id:
+        try:
+            from agents.coordination_bus import CoordinationBus
+            bus = CoordinationBus(config.DB_PATH)
+            item_type = resolved_item.get("item_type", "unknown") if resolved_item else "unknown"
+            item_src  = resolved_item.get("source",    "Agent")   if resolved_item else "Agent"
+            bus.post_consensus(
+                run_id     = run_id,
+                from_agent = f"Human Operator ({req.resolved_by})",
+                eval_id    = item_id,           # links back to the HITL item id
+                subject    = f"HITL #{item_id} APPROVED — {item_type} from {item_src}",
+                resolution = {
+                    "decision":     "approved",
+                    "hitl_item_id": item_id,
+                    "item_type":    item_type,
+                    "comment":      req.comment,
+                    "resolved_by":  req.resolved_by,
+                    "erp_switch_applied": erp_switch_applied,
+                },
+            )
+            logger.info("[HITL] Consensus message posted to coordination bus for item %d", item_id)
+        except Exception as exc:
+            logger.warning("[HITL] Failed to post coordination consensus: %s", exc)
+
+    # ── Trigger a fresh orchestrator run so all agent states update ──────────
+    if not _CACHE["is_running"]:
+        background_tasks.add_task(_run_orchestrator_sync)
+        logger.info("[HITL] Triggered background orchestrator re-run after approval of item %d", item_id)
+    else:
+        logger.info("[HITL] Orchestrator already running; skipping re-run trigger for item %d", item_id)
+
+    if erp_switch_applied:
+        return _json_safe({"status": "approved", "item_id": item_id,
+                           "erp_switch_applied": True,
+                           "erp_type": _CACHE["erp_adapter"].erp_type if _CACHE.get("erp_adapter") else None,
+                           "rerun_triggered": not _CACHE["is_running"]})
+    return _json_safe({"status": "approved", "item_id": item_id,
+                       "rerun_triggered": not _CACHE["is_running"]})
 
 
 @app.post("/api/hitl/reject/{item_id}")
-def reject_hitl_item(item_id: int, req: HitlActionRequest):
-    ok = HitlManager().reject(item_id, comment=req.comment, rejected_by=req.resolved_by)
+def reject_hitl_item(item_id: int, req: HitlActionRequest, background_tasks: BackgroundTasks):
+    hm = HitlManager()
+
+    # Fetch the item before resolving so we can build a coordination message
+    pending_items = hm.get_pending()
+    resolved_item = next((i for i in pending_items if i["id"] == item_id), None)
+
+    ok = hm.reject(item_id, comment=req.comment, rejected_by=req.resolved_by)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Item {item_id} not found or already resolved")
 
     # ── ERP switch rejection: clear pending switch ─────────────────────────
+    erp_switch_rejected = False
+    rejected_adapter    = None
     if _CACHE.get("erp_pending_hitl_id") == item_id:
         rejected_adapter = _CACHE.pop("erp_pending_adapter", None)
         _CACHE["erp_pending_hitl_id"] = None
+        erp_switch_rejected = True
         logger.info("[ERP] Switch REJECTED — staying on current adapter. Rejected: %s", rejected_adapter)
-        return {"status": "rejected", "item_id": item_id,
-                "erp_switch_rejected": True, "rejected_adapter": rejected_adapter}
 
-    return {"status": "rejected", "item_id": item_id}
+    # ── Post a coordination-bus escalate message so AgentReasoning sees it ──
+    run_id = _CACHE.get("run_id")
+    if run_id:
+        try:
+            from agents.coordination_bus import CoordinationBus
+            bus = CoordinationBus(config.DB_PATH)
+            item_type = resolved_item.get("item_type", "unknown") if resolved_item else "unknown"
+            item_src  = resolved_item.get("source",    "Agent")   if resolved_item else "Agent"
+            bus.post_escalate(
+                run_id     = run_id,
+                from_agent = f"Human Operator ({req.resolved_by})",
+                eval_id    = item_id,
+                subject    = f"HITL #{item_id} REJECTED — {item_type} from {item_src}",
+                context    = {
+                    "decision":            "rejected",
+                    "hitl_item_id":        item_id,
+                    "item_type":           item_type,
+                    "reason":              req.comment or "Rejected by human operator",
+                    "resolved_by":         req.resolved_by,
+                    "erp_switch_rejected": erp_switch_rejected,
+                    "rejected_adapter":    rejected_adapter,
+                },
+            )
+            logger.info("[HITL] Escalate message posted to coordination bus for rejected item %d", item_id)
+        except Exception as exc:
+            logger.warning("[HITL] Failed to post coordination escalate: %s", exc)
+
+    # ── Trigger a fresh orchestrator run so all agent states update ──────────
+    if not _CACHE["is_running"]:
+        background_tasks.add_task(_run_orchestrator_sync)
+        logger.info("[HITL] Triggered background orchestrator re-run after rejection of item %d", item_id)
+    else:
+        logger.info("[HITL] Orchestrator already running; skipping re-run trigger for item %d", item_id)
+
+    if erp_switch_rejected:
+        return _json_safe({"status": "rejected", "item_id": item_id,
+                           "erp_switch_rejected": True,
+                           "rejected_adapter":    rejected_adapter,
+                           "rerun_triggered":      not _CACHE["is_running"]})
+    return _json_safe({"status": "rejected", "item_id": item_id,
+                       "rerun_triggered": not _CACHE["is_running"]})
 
 
 @app.post("/api/hitl/enqueue")
@@ -1435,7 +1526,7 @@ If no parameter maps to the query, set all numeric fields to null and explain in
 
     try:
         resp = _req.post(
-            "http://localhost:11434/api/generate",
+            "http://192.168.137.97:11434/api/generate",
             json={"model": "llama3.2", "prompt": prompt, "stream": False, "format": "json"},
             timeout=30,
         )

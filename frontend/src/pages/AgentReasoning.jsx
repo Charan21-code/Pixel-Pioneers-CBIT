@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Brain, Cpu, ShoppingCart, Leaf, DollarSign, Calendar,
   GitBranch, CheckCircle, Loader2, Clock, AlertTriangle,
-  ChevronRight, Zap, TrendingUp, X
+  ChevronRight, Zap, TrendingUp, X, Bell, RefreshCw
 } from 'lucide-react'
 import * as api from '../api/client'
 import './AgentReasoning.css'
@@ -26,9 +26,9 @@ const AGENTS = [
   { id: 'Forecaster', label: 'Forecaster', subtitle: 'Demand Intelligence', Icon: Brain, color: 'var(--cyan)', glow: 'var(--cyan-glow)', px: 18.5, py: 15 },
   { id: 'Mechanic', label: 'Mechanic', subtitle: 'Machine Health', Icon: Cpu, color: 'var(--amber)', glow: 'var(--amber-glow)', px: 50, py: 15 },
   { id: 'Buyer', label: 'Buyer', subtitle: 'Procurement', Icon: ShoppingCart, color: 'var(--green)', glow: 'var(--green-glow)', px: 81.5, py: 15 },
-  { id: 'Environmentalist', label: 'Environmentalist', subtitle: 'Carbon & Energy', Icon: Leaf, color: 'var(--green)', glow: 'var(--green-glow)', px: 18.5, py: 50 },
-  { id: 'Finance', label: 'Finance', subtitle: 'Budget Gate', Icon: DollarSign, color: 'var(--amber)', glow: 'var(--amber-glow)', px: 50, py: 50 },
-  { id: 'Scheduler', label: 'Scheduler', subtitle: 'Production Planning', Icon: Calendar, color: 'var(--purple)', glow: 'var(--purple-glow)', px: 81.5, py: 50 },
+  { id: 'Environmentalist', label: 'Environmentalist', subtitle: 'Carbon & Energy', Icon: Leaf, color: 'var(--green)', glow: 'var(--green-glow)', px: 18.5, py: 60 },
+  { id: 'Finance', label: 'Finance', subtitle: 'Budget Gate', Icon: DollarSign, color: 'var(--amber)', glow: 'var(--amber-glow)', px: 50, py: 55 },
+  { id: 'Scheduler', label: 'Scheduler', subtitle: 'Production Planning', Icon: Calendar, color: 'var(--purple)', glow: 'var(--purple-glow)', px: 81.5, py: 60 },
   { id: 'Orchestrator', label: 'Orchestrator', subtitle: 'System Supervisor', Icon: GitBranch, color: 'var(--red)', glow: 'var(--red-glow)', px: 50, py: 85 },
 ]
 
@@ -267,6 +267,8 @@ export default function AgentReasoning() {
   const [blockerIds, setBlockerIds] = useState(new Set())
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerThread, setDrawerThread] = useState(null)
+  const [hitlCounts, setHitlCounts] = useState({ total: 0 })
+  const [hitlRerunFlash, setHitlRerunFlash] = useState(false)
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
@@ -355,6 +357,26 @@ export default function AgentReasoning() {
     return () => clearInterval(id)
   }, [fetchState])
 
+  // ── HITL count polling (every 4 s, independent of main loop) ──────────────
+  useEffect(() => {
+    const pollHitl = async () => {
+      try {
+        const c = await api.getHitlCounts()
+        setHitlCounts(prev => {
+          // If total just dropped (a human resolved something) show the rerun flash
+          if (prev.total > 0 && (c.total ?? 0) < prev.total) {
+            setHitlRerunFlash(true)
+            setTimeout(() => setHitlRerunFlash(false), 5000)
+          }
+          return c
+        })
+      } catch { /* ignore */ }
+    }
+    pollHitl()
+    const id = setInterval(pollHitl, 4000)
+    return () => clearInterval(id)
+  }, [])
+
   const openThread = async (msg) => {
     if (msg.msg_type !== 'blocker') return
     try {
@@ -388,14 +410,64 @@ export default function AgentReasoning() {
           <h1 className="rp-title">⬡ Agent Reasoning</h1>
           <p className="rp-subtitle">Live multi-agent pipeline with cross-department coordination protocol</p>
         </div>
-        <div className="rp-status-pill" style={{ borderColor: statusColor }}>
-          <span className="rp-status-dot" style={{ background: statusColor, boxShadow: `0 0 8px ${statusGlow}` }} />
-          {statusLabel}
-          {coordMsgs.length > 0 && (
-            <span className="rp-coord-count-badge">{coordMsgs.length} coord msgs</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {hitlRerunFlash && (
+            <span style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontSize: 12, color: 'var(--green)',
+              background: 'rgba(34,197,94,0.10)',
+              border: '1px solid var(--green)',
+              borderRadius: 20, padding: '4px 12px',
+              animation: 'fadeIn 0.3s ease',
+            }}>
+              <RefreshCw size={11} style={{ animation: 'spin 1s linear infinite' }} />
+              Agents re-running after HITL resolution…
+            </span>
           )}
+          <div className="rp-status-pill" style={{ borderColor: statusColor }}>
+            <span className="rp-status-dot" style={{ background: statusColor, boxShadow: `0 0 8px ${statusGlow}` }} />
+            {statusLabel}
+            {coordMsgs.length > 0 && (
+              <span className="rp-coord-count-badge">{coordMsgs.length} coord msgs</span>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* ── HITL Pending Alert Banner ── */}
+      {hitlCounts.total > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          background: 'rgba(251,191,36,0.08)',
+          border: '1px solid var(--amber)',
+          borderRadius: 10,
+          padding: '10px 18px',
+          marginBottom: 16,
+          fontSize: 13,
+        }}>
+          <Bell size={15} style={{ color: 'var(--amber)', flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <span style={{ color: 'var(--amber)', fontWeight: 700 }}>
+              {hitlCounts.total} HITL item{hitlCounts.total !== 1 ? 's' : ''} awaiting human review
+            </span>
+            <span style={{ color: 'var(--text-muted)', marginLeft: 10 }}>
+              {[
+                hitlCounts.ops         && `${hitlCounts.ops} ops`,
+                hitlCounts.procurement && `${hitlCounts.procurement} procurement`,
+                hitlCounts.finance     && `${hitlCounts.finance} finance`,
+                hitlCounts.maintenance && `${hitlCounts.maintenance} maintenance`,
+                hitlCounts.carbon      && `${hitlCounts.carbon} carbon`,
+              ].filter(Boolean).join(' · ')}
+            </span>
+          </div>
+          <span style={{
+            fontSize: 11, color: 'var(--amber)', opacity: 0.7,
+            fontFamily: 'var(--font-mono)',
+          }}>
+            → Go to HITL Inbox to resolve
+          </span>
+        </div>
+      )}
 
       {/* ── Pipeline Graph ── */}
       <div className="rp-graph-card">

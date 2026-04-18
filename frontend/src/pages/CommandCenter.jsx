@@ -213,8 +213,8 @@ export default function CommandCenter({ onRunAgents, running }) {
         <div className="ops-hero-left">
           <span className="ops-hero-chip">{hero.label}</span>
           <h2>
-            <HeroIcon size={20} />
-            PROXIMA
+            {/* <HeroIcon size={20} /> */}
+            {/* PROXIMA */}
           </h2>
           <p>{hero.text}</p>
         </div>
