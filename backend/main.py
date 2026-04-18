@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import sys
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Optional
@@ -31,7 +32,8 @@ sys.path.insert(0, ROOT_DIR)
 import config
 from agents.orchestrator import OrchestratorAgent
 from hitl.manager import HitlManager
-from simulation.digital_twin import simulate, derive_defaults_from_agent_output
+from simulation.digital_twin import simulate, simulate_scenario_compare, derive_defaults_from_agent_output
+from simulation import twin_ml
 from nlp.control_center import (
     heuristic_intent,
     build_query_answer,
@@ -80,6 +82,10 @@ async def lifespan(app: FastAPI):
     logger.info("[Startup] Pre-loading data.csv into cache...")
     _load_df()   # warm the CSV cache so the first API call is instant
 
+    # Kick off ML model training immediately in a background thread
+    logger.info("[Startup] Triggering Digital Twin ML training...")
+    twin_ml.ensure_model_trained()
+
     task = asyncio.create_task(_agent_loop())
     logger.info("[Startup] Always-on agent loop scheduled.")
     yield
@@ -109,11 +115,14 @@ app.add_middleware(
 
 # ── Global state ──────────────────────────────────────────────────────────────
 _CACHE: dict = {
-    "orch_output":  None,
-    "df":           None,
-    "last_run_at":  None,
-    "is_running":   False,
-    "active_agent": None,   # name of the agent currently executing, or None
+    "orch_output":      None,
+    "df":               None,
+    "last_run_at":      None,
+    "is_running":       False,
+    "active_agent":     None,
+    "run_id":           None,
+    "run_started_at":   None,
+    "scenario_override": None,   # injected by /api/twin/apply-scenario
 }
 
 
@@ -201,6 +210,9 @@ def _run_orchestrator_sync() -> dict:
 
     _CACHE["is_running"] = True
     _CACHE["active_agent"] = None
+    new_run_id = str(uuid.uuid4())
+    _CACHE["run_id"] = new_run_id
+    _CACHE["run_started_at"] = datetime.utcnow().isoformat()
 
     def _progress(agent_name):
         """Called by OrchestratorAgent.run() before each agent step."""
@@ -223,6 +235,51 @@ def _run_orchestrator_sync() -> dict:
         return _json_safe(result)
     except Exception as exc:
         logger.error("Orchestrator run failed: %s", exc, exc_info=True)
+        return {"error": str(exc)}
+    finally:
+        _CACHE["is_running"] = False
+        _CACHE["active_agent"] = None
+
+
+def _run_orchestrator_sync_with_scenario() -> dict:
+    """Like _run_orchestrator_sync but merges scenario_override into context."""
+    override = _CACHE.pop("scenario_override", None) or {}
+    if _CACHE["is_running"]:
+        return {"status": "already_running"}
+
+    _CACHE["is_running"] = True
+    _CACHE["active_agent"] = None
+    new_run_id = str(uuid.uuid4())
+    _CACHE["run_id"] = new_run_id
+    _CACHE["run_started_at"] = datetime.utcnow().isoformat()
+
+    def _progress(agent_name):
+        _CACHE["active_agent"] = agent_name
+
+    try:
+        df = _load_df()
+        if df.empty:
+            return {"error": "No data available"}
+
+        as_of_time = df["Timestamp"].max()
+        context = {
+            "df":               df,
+            "as_of_time":       as_of_time,
+            "forecast_qty_override":   override.get("forecast_qty"),
+            "optimise_for":            override.get("optimise_for", "Time"),
+            "oee_override_pct":        override.get("oee_override"),
+            "workforce_override_pct":  override.get("workforce_override"),
+            "scenario_label":          override.get("applied_label", "Custom Scenario"),
+        }
+        orch = OrchestratorAgent()
+        result = orch.run(context, progress_callback=_progress)
+        result["applied_scenario"] = override.get("applied_label")
+        _CACHE["orch_output"] = result
+        _CACHE["last_run_at"] = datetime.utcnow().isoformat()
+        logger.info("[ScenarioRun] Complete: %s", override.get("applied_label"))
+        return _json_safe(result)
+    except Exception as exc:
+        logger.error("Scenario orchestrator run failed: %s", exc, exc_info=True)
         return {"error": str(exc)}
     finally:
         _CACHE["is_running"] = False
@@ -258,6 +315,33 @@ class SimulationRequest(BaseModel):
     horizon_days:    int   = 7
     base_capacity:   Optional[int] = None
     demand_buffer_pct: float = 0.10
+
+
+class ScenarioItem(BaseModel):
+    label:           str
+    plant_id:        str
+    oee_pct:         float = 91.0
+    workforce_pct:   float = 95.0
+    forecast_qty:    int   = 2000
+    energy_price:    float = 0.12
+    downtime_hrs:    float = 0.0
+    optimise_for:    str   = "Time"
+    horizon_days:    int   = 7
+    base_capacity:   Optional[int] = None
+    demand_buffer_pct: float = 0.10
+
+
+class ScenarioCompareRequest(BaseModel):
+    scenarios: list[ScenarioItem]
+
+
+class TwinChatRequest(BaseModel):
+    prompt:  str
+    context: dict = {}   # current scenario params for Ollama
+
+
+class ApplyScenarioRequest(BaseModel):
+    scenario: ScenarioItem
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -324,11 +408,13 @@ def get_system_status():
 
 @app.get("/api/agents/active")
 def get_active_agent():
-    """Returns which agent is currently executing (or None if idle)."""
+    """Returns which agent is currently executing, the current run_id, and run metadata."""
     return {
-        "is_running":   _CACHE["is_running"],
-        "active_agent": _CACHE["active_agent"],
-        "last_run_at":  _CACHE.get("last_run_at"),
+        "is_running":     _CACHE["is_running"],
+        "active_agent":   _CACHE["active_agent"],
+        "last_run_at":    _CACHE.get("last_run_at"),
+        "run_id":         _CACHE.get("run_id"),
+        "run_started_at": _CACHE.get("run_started_at"),
     }
 
 
@@ -713,14 +799,22 @@ def get_carbon():
 # ── Agent Activity Log ────────────────────────────────────────────────────────
 
 @app.get("/api/agents/log")
-def get_agent_log(limit: int = 100, agent_name: Optional[str] = None, severity: Optional[str] = None):
-    """Agent activity log from agent_events table."""
+def get_agent_log(
+    limit: int = 100,
+    agent_name: Optional[str] = None,
+    severity: Optional[str] = None,
+    run_id: Optional[str] = None,
+):
+    """Agent activity log from agent_events table. Optionally filter by run_id."""
     try:
         import sqlite3
         conn = sqlite3.connect(config.DB_PATH)
         conn.row_factory = sqlite3.Row
         query  = "SELECT * FROM agent_events WHERE 1=1"
         params = []
+        if run_id:
+            query += " AND run_id = ?"
+            params.append(run_id)
         if agent_name:
             query += " AND agent_name = ?"
             params.append(agent_name)
@@ -734,6 +828,60 @@ def get_agent_log(limit: int = 100, agent_name: Optional[str] = None, severity: 
     except Exception as exc:
         logger.error("get_agent_log failed: %s", exc)
         return {"log": []}
+
+
+# ── Coordination ────────────────────────────────────────────────────────────────
+
+@app.get("/api/coordination/messages")
+def get_coordination_messages(run_id: Optional[str] = None):
+    """All coordination messages for a run (or the current run if run_id is omitted)."""
+    from agents.coordination_bus import CoordinationBus
+    bus = CoordinationBus(config.DB_PATH)
+    effective_run_id = run_id or _CACHE.get("run_id")
+    if not effective_run_id:
+        return {"messages": [], "run_id": None}
+    messages = bus.get_all_for_run(effective_run_id)
+    # Parse JSON payload strings
+    for m in messages:
+        if isinstance(m.get("payload"), str):
+            try:
+                m["payload"] = json.loads(m["payload"])
+            except Exception:
+                pass
+        if isinstance(m.get("to_agent"), str):
+            try:
+                m["to_agent"] = json.loads(m["to_agent"])
+            except Exception:
+                pass
+    return _json_safe({"messages": messages, "run_id": effective_run_id})
+
+
+@app.get("/api/coordination/active")
+def get_coordination_active():
+    """Returns open coordination blockers and proposals for the current run."""
+    from agents.coordination_bus import CoordinationBus
+    bus = CoordinationBus(config.DB_PATH)
+    run_id = _CACHE.get("run_id")
+    if not run_id:
+        return {"blockers": [], "proposals": [], "run_id": None}
+    blockers  = bus.get_open_blockers(run_id)
+    proposals = bus.get_proposals_for_finance(run_id)
+    for m in blockers + proposals:
+        if isinstance(m.get("payload"), str):
+            try:
+                m["payload"] = json.loads(m["payload"])
+            except Exception:
+                pass
+    return _json_safe({"blockers": blockers, "proposals": proposals, "run_id": run_id})
+
+
+@app.get("/api/coordination/thread/{blocker_id}")
+def get_coordination_thread(blocker_id: int):
+    """Full negotiation thread starting from a blocker message."""
+    from agents.coordination_bus import CoordinationBus
+    bus = CoordinationBus(config.DB_PATH)
+    thread = bus.get_full_thread(blocker_id)
+    return _json_safe({"thread": thread})
 
 
 # ── HITL ──────────────────────────────────────────────────────────────────────
@@ -892,6 +1040,160 @@ def run_simulation(req: SimulationRequest):
     except Exception as exc:
         logger.error("Simulation failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/twin/scenarios")
+def run_scenario_compare(req: ScenarioCompareRequest):
+    """Run up to 4 scenarios and return comparison matrix."""
+    if not req.scenarios:
+        raise HTTPException(status_code=400, detail="No scenarios provided")
+    try:
+        scenario_dicts = [
+            {
+                "plant_id":          s.plant_id,
+                "oee_pct":           s.oee_pct,
+                "workforce_pct":     s.workforce_pct,
+                "forecast_qty":      s.forecast_qty,
+                "energy_price":      s.energy_price,
+                "downtime_hrs":      s.downtime_hrs,
+                "optimise_for":      s.optimise_for,
+                "horizon_days":      s.horizon_days,
+                "base_capacity":     s.base_capacity,
+                "demand_buffer_pct": s.demand_buffer_pct,
+            }
+            for s in req.scenarios
+        ]
+        results = simulate_scenario_compare(scenario_dicts)
+        # Attach original label to each result
+        for i, r in enumerate(results):
+            r["label"] = req.scenarios[i].label if i < len(req.scenarios) else f"Scenario {i+1}"
+        return _json_safe({"results": results})
+    except Exception as exc:
+        logger.error("Scenario compare failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/twin/chat")
+def twin_chat(req: TwinChatRequest):
+    """Natural-language 'What if?' → Ollama extracts constraints → simulate."""
+    import requests as _req
+    ctx = req.context
+    plant_id = ctx.get("plant_id", "Plant 1")
+    prompt = f"""You are a digital twin assistant for a production planning system.
+
+Current simulation context:
+- Plant: {plant_id}
+- OEE: {ctx.get('oee_pct', 91)}%
+- Workforce: {ctx.get('workforce_pct', 95)}%
+- Forecast demand: {ctx.get('forecast_qty', 2000)} units
+- Downtime: {ctx.get('downtime_hrs', 0)} hours
+- Optimise for: {ctx.get('optimise_for', 'Time')}
+- Energy price: ${ctx.get('energy_price', 0.12)}/kWh
+- Horizon: {ctx.get('horizon_days', 7)} days
+
+User query: "{req.prompt}"
+
+Extract parameter changes from the query and respond with ONLY this JSON:
+{{
+  "oee_pct": <float or null>,
+  "workforce_pct": <float or null>,
+  "forecast_qty": <int or null>,
+  "downtime_hrs": <float or null>,
+  "optimise_for": <"Time"|"Cost"|"Carbon" or null>,
+  "energy_price": <float or null>,
+  "horizon_days": <int or null>,
+  "explanation": "One sentence explaining what changed and why"
+}}
+
+If no parameter maps to the query, set all numeric fields to null and explain in 'explanation'."""
+
+    try:
+        resp = _req.post(
+            "http://localhost:11434/api/generate",
+            json={"model": "llama3.2", "prompt": prompt, "stream": False, "format": "json"},
+            timeout=30,
+        )
+        raw = resp.json().get("response", "{}")
+        import json as _json
+        changes = _json.loads(raw)
+    except Exception:
+        changes = {"explanation": "Could not parse your query. Please try rephrasing."}
+
+    # Merge changes into current params
+    new_params = dict(ctx)
+    changed_fields = []
+    for field in ["oee_pct", "workforce_pct", "forecast_qty", "downtime_hrs",
+                  "optimise_for", "energy_price", "horizon_days"]:
+        val = changes.get(field)
+        if val is not None:
+            new_params[field] = val
+            changed_fields.append(field)
+
+    # Run simulation with new params
+    sim_result = None
+    if changed_fields:
+        try:
+            sim_result = simulate(
+                plant_id          = new_params.get("plant_id", plant_id),
+                oee_pct           = float(new_params.get("oee_pct", 91)),
+                workforce_pct     = float(new_params.get("workforce_pct", 95)),
+                forecast_qty      = int(new_params.get("forecast_qty", 2000)),
+                energy_price      = float(new_params.get("energy_price", 0.12)),
+                downtime_hrs      = float(new_params.get("downtime_hrs", 0)),
+                optimise_for      = str(new_params.get("optimise_for", "Time")),
+                horizon_days      = int(new_params.get("horizon_days", 7)),
+                base_capacity     = new_params.get("base_capacity"),
+                demand_buffer_pct = float(new_params.get("demand_buffer_pct", 0.10)),
+            )
+        except Exception as exc:
+            logger.warning("Twin chat simulation failed: %s", exc)
+
+    return _json_safe({
+        "explanation":     changes.get("explanation", ""),
+        "changed_fields":  changed_fields,
+        "new_params":      new_params,
+        "simulation":      sim_result,
+    })
+
+
+@app.get("/api/twin/model/status")
+def get_twin_model_status():
+    """Return ML model training status, R², and feature importances."""
+    return _json_safe(twin_ml.get_model_status())
+
+
+@app.post("/api/twin/model/train")
+def trigger_twin_model_training(background_tasks: BackgroundTasks):
+    """Manually re-trigger ML model training."""
+    twin_ml.ensure_model_trained(force=True)
+    return {"status": "training_started"}
+
+
+@app.post("/api/twin/apply-scenario")
+def apply_scenario_to_live(req: ApplyScenarioRequest, background_tasks: BackgroundTasks):
+    """
+    Option B: Apply a scenario to the live schedule by injecting its parameters
+    into the orchestrator context and triggering a fresh agent run.
+    The scenario params override forecast_qty and optimise_for for this run.
+    """
+    if _CACHE["is_running"]:
+        raise HTTPException(status_code=409, detail="Orchestrator is already running. Try again shortly.")
+
+    s = req.scenario
+    _CACHE["scenario_override"] = {
+        "forecast_qty":       s.forecast_qty,
+        "optimise_for":       s.optimise_for,
+        "oee_override":       s.oee_pct,
+        "workforce_override": s.workforce_pct,
+        "applied_label":      s.label,
+        "applied_at":         datetime.utcnow().isoformat(),
+    }
+    background_tasks.add_task(_run_orchestrator_sync_with_scenario)
+    return {
+        "status":   "started",
+        "message":  f"Scenario '{s.label}' is being applied to the live schedule.",
+        "scenario": s.label,
+    }
 
 
 # ── Summary endpoint for Command Center ───────────────────────────────────────

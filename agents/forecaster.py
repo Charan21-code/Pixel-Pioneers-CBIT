@@ -55,9 +55,18 @@ class ForecasterAgent(BaseAgent):
         """
         df: pd.DataFrame = context.get("df", pd.DataFrame())
         as_of_time: pd.Timestamp = context.get("as_of_time", pd.Timestamp.now())
+        run_id: str = context.get("run_id")
 
         if df.empty:
             return self._empty_result("No data available in context.")
+
+        self.publish_signal(
+            severity="INFO",
+            message="Fitting demand regression model and computing 7-day forecast...",
+            confidence_pct=50.0,
+            action_taken="Forecast analysis started",
+            run_id=run_id,
+        )
 
         # ── Step 1: Aggregate daily demand ───────────────────────────────────
         daily = self._daily_demand(df)

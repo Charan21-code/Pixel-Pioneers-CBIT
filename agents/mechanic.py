@@ -53,9 +53,18 @@ class MechanicAgent(BaseAgent):
             summary             str   — plain English summary
         """
         df: pd.DataFrame = context.get("df", pd.DataFrame())
+        run_id: str = context.get("run_id")
 
         if df.empty:
             return self._empty_result("No data available in context.")
+
+        self.publish_signal(
+            severity="INFO",
+            message="Analysing machine OEE, TTF, and temperature sensors across all facilities...",
+            confidence_pct=50.0,
+            action_taken="Machine health scan started",
+            run_id=run_id,
+        )
 
         # ── Step 1: Compute per-facility risk scores ──────────────────────────
         facility_risks = self._score_facilities(df)

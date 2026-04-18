@@ -64,9 +64,18 @@ class SchedulerAgent(BaseAgent):
         df: pd.DataFrame = context.get("df", pd.DataFrame())
         mechanic_out: dict = context.get("mechanic", {})
         forecast_out: dict = context.get("forecast", {})
+        run_id: str = context.get("run_id")
 
         if df.empty:
             return self._empty_result("No data available in context.")
+
+        self.publish_signal(
+            severity="INFO",
+            message="Building 7-day shift plan. Analysing OEE rankings and checking coordination blockers...",
+            confidence_pct=50.0,
+            action_taken="Scheduling started",
+            run_id=run_id,
+        )
 
         viral_demand_shock = forecast_out.get("viral_demand_shock", False)
         optimise_for = str(context.get("optimise_for", "Time") or "Time").title()
@@ -145,7 +154,12 @@ class SchedulerAgent(BaseAgent):
             message=summary,
             confidence_pct=round(utilisation_pct, 1),
             action_taken="Shift plan committed",
+            run_id=run_id,
         )
+
+        # ── Step 6: Coordination — read blockers, post proposals ──────────────
+        if run_id:
+            self._handle_coordination_blockers(run_id, ranked_facilities, context)
 
         return {
             "shift_plan":           shift_plan,
@@ -163,6 +177,120 @@ class SchedulerAgent(BaseAgent):
             },
             "summary":              summary,
         }
+
+    # ── Coordination: read blockers, post proposals ─────────────────────────
+
+    def _handle_coordination_blockers(
+        self, run_id: str, ranked_facilities: list, context: dict
+    ):
+        """For each open blocker assigned to Scheduler, use Ollama to generate
+        3 alternative options and post them as a proposal for Finance to evaluate."""
+        blockers = self.bus.get_open_blockers(run_id, to_agent="Scheduler")
+        for blocker in blockers:
+            try:
+                payload = blocker.get("payload", {})
+                if isinstance(payload, str):
+                    import json as _json
+                    payload = _json.loads(payload)
+
+                options = self._generate_alternatives_ollama(
+                    blocker=blocker,
+                    payload=payload,
+                    ranked_facilities=ranked_facilities,
+                    context=context,
+                )
+                if not options:
+                    logger.warning("[Scheduler] No alternatives generated for blocker %s", blocker["id"])
+                    continue
+
+                proposal_subject = f"Alternatives for: {blocker['subject']}"
+                self.bus.post_proposal(
+                    run_id=run_id,
+                    from_agent=self.agent_name,
+                    blocker_id=blocker["id"],
+                    subject=proposal_subject,
+                    options=options,
+                )
+                self.publish_signal(
+                    severity="INFO",
+                    message=f"PROPOSAL posted: {len(options)} alternatives for blocker ‘{blocker['subject'][:60]}’",
+                    confidence_pct=80.0,
+                    action_taken="Coordination proposal posted to Finance",
+                    run_id=run_id,
+                )
+            except Exception as exc:
+                logger.warning("[Scheduler] Blocker handling failed for %s: %s", blocker.get("id"), exc)
+
+    def _generate_alternatives_ollama(self, blocker: dict, payload: dict, ranked_facilities: list, context: dict) -> list:
+        """Use Ollama to generate 3 concrete alternative options for a supply blocker."""
+        facility = payload.get("facility", "unknown")
+        sku = payload.get("sku", "Unknown SKU")
+        days_remaining = payload.get("days_remaining", 0)
+        delay_days = payload.get("delay_days", 5)
+        unit_price = payload.get("unit_price", 5.0)
+        reorder_qty = payload.get("daily_demand_est", 500) * delay_days
+
+        alt_facilities = [
+            f["facility"] for f in ranked_facilities
+            if f["facility"] != facility
+        ][:2]
+
+        prompt = f"""You are a production scheduler resolving a supply chain blocker at a global electronics factory.
+
+BLOCKER DETAILS:
+- Affected facility: {facility}
+- Material at risk: {sku}
+- Current stock coverage: {days_remaining:.0f} days
+- Required lead time: {delay_days} days
+- Estimated daily demand: {payload.get('daily_demand_est', 500)} units
+- Estimated reorder cost: ${reorder_qty * unit_price:,.0f}
+- Urgency: {payload.get('reorder_urgency', 'MEDIUM')}
+
+Alternative facilities available:
+{alt_facilities}
+
+Generate exactly 3 alternative options to resolve this blocker. Each option must have a realistic cost delta and lead time impact.
+
+Respond ONLY with this JSON structure:
+{{
+  "options": [
+    {{
+      "label": "Short option name (max 6 words)",
+      "description": "One sentence explaining the option",
+      "alt_facility": "facility name if shifting, else null",
+      "cost_delta_usd": number,
+      "lead_time_delta_days": number,
+      "risk_level": "LOW|MEDIUM|HIGH"
+    }}
+  ]
+}}"""
+        result = self.call_ollama(prompt)
+        return result.get("options", [
+            {
+                "label": "Expedite from current supplier",
+                "description": f"Pay premium freight to get {sku} to {facility} in {max(1,delay_days-2)} days.",
+                "alt_facility": None,
+                "cost_delta_usd": round(reorder_qty * unit_price * 0.35, 0),
+                "lead_time_delta_days": -2,
+                "risk_level": "MEDIUM",
+            },
+            {
+                "label": f"Shift production to {alt_facilities[0] if alt_facilities else 'backup facility'}",
+                "description": f"Re-route orders to {alt_facilities[0] if alt_facilities else 'backup'} until stock at {facility} recovers.",
+                "alt_facility": alt_facilities[0] if alt_facilities else None,
+                "cost_delta_usd": round(reorder_qty * unit_price * 0.12, 0),
+                "lead_time_delta_days": 1,
+                "risk_level": "LOW",
+            },
+            {
+                "label": "Substitute compatible material",
+                "description": f"Use similar-spec material already in stock at {facility} for the next {delay_days} days.",
+                "alt_facility": None,
+                "cost_delta_usd": round(reorder_qty * unit_price * 0.05, 0),
+                "lead_time_delta_days": 0,
+                "risk_level": "HIGH",
+            },
+        ])
 
     # ── Private helpers ───────────────────────────────────────────────────────
 

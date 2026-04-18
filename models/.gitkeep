@@ -1,0 +1,2 @@
+# models directory — ML model artifacts live here
+# twin_model.pkl is auto-generated at backend startup and gitignored

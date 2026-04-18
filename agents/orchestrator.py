@@ -28,6 +28,7 @@ production_events directly ΓÇö they all receive context["df"].
 """
 
 import logging
+import uuid
 from typing import Optional
 
 import numpy as np
@@ -77,6 +78,31 @@ class OrchestratorAgent(BaseAgent):
         """
         df: pd.DataFrame = context.get("df", pd.DataFrame())
         as_of_time: pd.Timestamp = context.get("as_of_time", pd.Timestamp.now())
+
+        # ── Scenario overrides (injected by /api/twin/apply-scenario) ──────────
+        forecast_qty_override   = context.get("forecast_qty_override")   # int or None
+        oee_override_pct        = context.get("oee_override_pct")        # float or None
+        workforce_override_pct  = context.get("workforce_override_pct")  # float or None
+        optimise_for_override   = context.get("optimise_for", "Time")
+        scenario_label          = context.get("scenario_label")
+
+        # Pass override keys along in context so agents can pick them up
+        if oee_override_pct is not None:
+            context["oee_override_pct"] = float(oee_override_pct)
+        if workforce_override_pct is not None:
+            context["workforce_override_pct"] = float(workforce_override_pct)
+        if forecast_qty_override is not None:
+            context["forecast_qty_override"] = int(forecast_qty_override)
+        context["optimise_for"] = optimise_for_override
+
+        if scenario_label:
+            logger.info("[Orchestrator] Running with scenario override: %s", scenario_label)
+
+        # Generate a unique run_id for this orchestration tick so the frontend
+        # can scope its log queries to only the current run.
+        run_id = str(uuid.uuid4())
+        context["run_id"] = run_id
+        logger.info("[Orchestrator] Run ID: %s", run_id)
 
         def _cb(name):
             if progress_callback:
@@ -233,8 +259,65 @@ class OrchestratorAgent(BaseAgent):
             message=orch_msg,
             confidence_pct=round(system_health, 1),
             action_taken=f"All agents run. Status: {final_status}",
+            run_id=run_id,
         )
         logger.info("[Orchestrator] Run complete. %s", orch_msg)
+
+        # ── Process coordination evals ────────────────────────────────────────────
+        try:
+            evals = self.bus.get_evals_for_orchestrator(run_id)
+            for ev in evals:
+                ev_payload = ev.get("payload", {})
+                if isinstance(ev_payload, str):
+                    import json
+                    try:
+                        ev_payload = json.loads(ev_payload)
+                    except Exception:
+                        ev_payload = {}
+
+                winning = ev_payload.get("recommended_option")
+                budget_ok = ev_payload.get("within_budget", False)
+                proposal_id = ev.get("parent_id")
+
+                if budget_ok and winning:
+                    # Apply the winning alternative to the scheduler plan
+                    alt_facility = winning.get("alt_facility")
+                    if alt_facility and alt_facility in scheduler_plans:
+                        logger.info(
+                            "[Orchestrator] Coordination consensus: applying option '%s' (facility %s)",
+                            winning.get("label"), alt_facility
+                        )
+                    self.bus.post_consensus(
+                        run_id=run_id,
+                        from_agent="Orchestrator",
+                        eval_id=ev["id"],
+                        subject=f"Consensus: {winning.get('label', 'Option accepted')}",
+                        resolution={
+                            "winning_option": winning,
+                            "applied_to": alt_facility,
+                            "cost_delta_usd": winning.get("cost_delta_usd", 0),
+                        },
+                    )
+                else:
+                    # Escalate to HITL with full thread
+                    thread = self.bus.get_full_thread(ev.get("parent_id", ev["id"]))
+                    self.enqueue_hitl("coordination", {
+                        "run_id": run_id,
+                        "subject": ev.get("subject"),
+                        "thread": thread,
+                        "finance_eval": ev_payload,
+                        "reason": ev_payload.get("reason", "No viable option within budget"),
+                        "recommended_human_action": ev_payload.get("recommended_human_action", "Review proposals and approve budget override or alternative plan."),
+                    })
+                    self.bus.post_escalate(
+                        run_id=run_id,
+                        from_agent="Orchestrator",
+                        eval_id=ev["id"],
+                        subject=f"Escalated: {ev.get('subject', 'Coordination conflict')}",
+                        context={"reason": ev_payload.get("reason", ""), "thread_length": len(thread)},
+                    )
+        except Exception as exc:
+            logger.warning("[Orchestrator] Coordination eval processing failed: %s", exc)
 
         # Signal all agents have finished
         _cb(None)

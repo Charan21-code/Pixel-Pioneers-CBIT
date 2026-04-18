@@ -30,6 +30,10 @@ export const getCarbon        = ()          => api.get('/carbon')
 export const getAgentLog      = (p={})      => api.get('/agents/log', { params: p })
 export const getActiveAgent   = ()          => api.get('/agents/active')
 
+export const getCoordinationMessages = (runId) => api.get('/coordination/messages', { params: runId ? { run_id: runId } : {} })
+export const getCoordinationActive   = ()       => api.get('/coordination/active')
+export const getCoordinationThread   = (id)     => api.get(`/coordination/thread/${id}`)
+
 export const getHitlCounts    = ()          => api.get('/hitl/counts')
 export const getHitlPending   = (t)         => api.get('/hitl/pending', { params: t ? { item_type: t } : {} })
 export const getHitlHistory   = (p={})      => api.get('/hitl/history', { params: p })
@@ -40,5 +44,9 @@ export const enqueueHitl      = (body)      => api.post('/hitl/enqueue', body)
 export const nlpQuery         = (body)      => api.post('/nlp/query', body)
 export const getSimDefaults   = (plant)     => api.get(`/simulation/defaults/${encodeURIComponent(plant)}`)
 export const runSimulation    = (body)      => api.post('/simulation/run', body)
+export const runScenarioCompare = (body)    => api.post('/twin/scenarios', body)
+export const twinChat           = (body)    => api.post('/twin/chat', body)
+export const getTwinModelStatus = ()        => api.get('/twin/model/status')
+export const applyScenario      = (body)    => api.post('/twin/apply-scenario', body)
 
 export default api

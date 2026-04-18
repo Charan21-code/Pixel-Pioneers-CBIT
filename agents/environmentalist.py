@@ -58,9 +58,18 @@ class EnvironmentalistAgent(BaseAgent):
             summary               str
         """
         df: pd.DataFrame = context.get("df", pd.DataFrame())
+        run_id: str = context.get("run_id")
 
         if df.empty:
             return self._empty_result("No data available in context.")
+
+        self.publish_signal(
+            severity="INFO",
+            message="Auditing peak vs off-peak energy consumption and carbon penalty exposure...",
+            confidence_pct=50.0,
+            action_taken="Environmental scan started",
+            run_id=run_id,
+        )
 
         totals = self._aggregate_totals(df)
         peak_stats = self._split_by_period(df)

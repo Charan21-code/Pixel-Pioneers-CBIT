@@ -162,6 +162,15 @@ class FinanceAgent(BaseAgent):
         forecast    = context.get("forecast", {})
         mechanic    = context.get("mechanic", {})
         environ     = context.get("environ",  {})
+        run_id: str = context.get("run_id")
+
+        self.publish_signal(
+            severity="INFO",
+            message="Evaluating budget gate, financial risk score, and coordination proposals...",
+            confidence_pct=50.0,
+            action_taken="Finance analysis started",
+            run_id=run_id,
+        )
 
         approved_spend_status = self.budget_tracker.get_status()
         budget_status         = self._derive_live_budget_status(df, as_of_time=as_of_time)
@@ -218,7 +227,12 @@ class FinanceAgent(BaseAgent):
             ),
             confidence_pct=health_score,
             action_taken=f"Budget snapshot logged. Gate: {gate_decision}",
+            run_id=run_id,
         )
+
+        # ── Coordination: evaluate Scheduler proposals ────────────────────────
+        if run_id:
+            self._evaluate_coordination_proposals(run_id, remaining_usd)
 
         return {
             "budget_status":         budget_status,
@@ -232,6 +246,83 @@ class FinanceAgent(BaseAgent):
             "suggestions":           suggestions,
             "summary":               summary,
         }
+
+    # ── Coordination: evaluate proposals ─────────────────────────────────────
+
+    def _evaluate_coordination_proposals(self, run_id: str, remaining_usd: float):
+        """Read open proposals from Scheduler and post cost-benefit evaluations."""
+        import json as _json
+        proposals = self.bus.get_proposals_for_finance(run_id)
+        for proposal in proposals:
+            try:
+                options = proposal.get("payload", [])
+                if isinstance(options, str):
+                    try:
+                        options = _json.loads(options)
+                    except Exception:
+                        options = []
+
+                evaluated = []
+                best_option = None
+                best_score = float("inf")
+
+                for opt in options:
+                    cost_delta = float(opt.get("cost_delta_usd", 0))
+                    lead_delta = int(opt.get("lead_time_delta_days", 0))
+                    risk_level = opt.get("risk_level", "MEDIUM")
+                    within_budget = cost_delta <= remaining_usd
+
+                    # Score: lower is better (cost + time penalty)
+                    risk_penalty = {"LOW": 0, "MEDIUM": 5000, "HIGH": 20000}.get(risk_level, 5000)
+                    score = cost_delta + (lead_delta * 2000) + risk_penalty
+
+                    ev_opt = {
+                        **opt,
+                        "within_budget": within_budget,
+                        "score": score,
+                        "budget_check": f"${cost_delta:,.0f} vs ${remaining_usd:,.0f} remaining",
+                    }
+                    evaluated.append(ev_opt)
+
+                    if within_budget and score < best_score:
+                        best_score = score
+                        best_option = ev_opt
+
+                within_budget_flag = best_option is not None
+                reason = (
+                    f"Recommended '{best_option['label']}' — lowest cost+risk score within budget."
+                    if best_option else
+                    f"No option fits within ${remaining_usd:,.0f} remaining budget."
+                )
+                human_action = (
+                    None if best_option else
+                    "Approve budget extension or select the lowest-cost option manually."
+                )
+
+                self.bus.post_eval(
+                    run_id=run_id,
+                    from_agent=self.agent_name,
+                    proposal_id=proposal["id"],
+                    subject=f"Finance eval: {proposal['subject'][:80]}",
+                    recommendation={
+                        "evaluated_options": evaluated,
+                        "recommended_option": best_option,
+                        "within_budget": within_budget_flag,
+                        "budget_remaining_usd": remaining_usd,
+                        "reason": reason,
+                        "recommended_human_action": human_action,
+                    },
+                )
+                self.publish_signal(
+                    severity="INFO" if within_budget_flag else "WARNING",
+                    message=f"EVAL posted: {reason}",
+                    confidence_pct=85.0 if within_budget_flag else 40.0,
+                    action_taken="Coordination eval posted to Orchestrator",
+                    run_id=run_id,
+                )
+            except Exception as exc:
+                import logging as _log
+                _log.getLogger(__name__).warning("[Finance] Proposal eval failed: %s", exc)
 
     # ── Private helpers ───────────────────────────────────────────────────────
 

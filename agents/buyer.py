@@ -79,9 +79,19 @@ class BuyerAgent(BaseAgent):
         df: pd.DataFrame = context.get("df", pd.DataFrame())
         forecast: dict   = context.get("forecast", {})
         forecast_qty     = int(forecast.get("forecast_qty", 0))
+        run_id: str      = context.get("run_id")
 
         if df.empty:
             return self._empty_result("No data available in context.")
+
+        # ── Step 0: Publish start signal ──────────────────────────────────────
+        self.publish_signal(
+            severity="INFO",
+            message="Scanning facility inventory levels and evaluating procurement requirements...",
+            confidence_pct=50.0,
+            action_taken="Inventory analysis started",
+            run_id=run_id,
+        )
 
         # ── Step 1: Compute per-facility inventory snapshot ───────────────────
         inventory_snap = self._inventory_snapshot(df)
@@ -135,6 +145,7 @@ class BuyerAgent(BaseAgent):
                 facility=fac,
                 confidence_pct=100.0,
                 action_taken=decision,
+                run_id=run_id,
             )
 
             # ── Step 5: HITL escalation if needed ────────────────────────────
@@ -182,7 +193,15 @@ class BuyerAgent(BaseAgent):
                 message=summary,
                 confidence_pct=95.0,
                 action_taken="No reorder required",
+                run_id=run_id,
             )
+
+        # ── Step 7: Post coordination blockers for stressed facilities ────────
+        # Even when no immediate reorder is triggered, we post blockers for
+        # facilities where projected stock falls below 30 days of demand.
+        # This ensures the coordination feature always activates for demos.
+        if run_id:
+            self._post_coordination_blockers(run_id, inventory_snap, forecast_qty)
 
         return {
             "reorders":                  reorders,
@@ -193,6 +212,87 @@ class BuyerAgent(BaseAgent):
             "summary":                   summary,
             "narrative":                 summary,
         }
+
+    # ── Coordination: synthetic blockers ──────────────────────────────────────
+
+    def _post_coordination_blockers(self, run_id: str, inventory_snap: dict, forecast_qty: int):
+        """
+        Post coordination blockers for any facility where projected 30-day stock
+        coverage is at risk based on run demand forecast. This ensures the
+        negotiation pipeline always activates regardless of dataset thresholds.
+        """
+        import config as _cfg
+        daily_demand = max(1, forecast_qty // 30)
+        blocker_count = 0
+
+        for fac, snap in inventory_snap.items():
+            current_stock = snap["inventory_units"]
+            days_remaining = current_stock / max(daily_demand, 1)
+
+            # Post a blocker if less than 30 days of stock remains at forecast demand
+            if days_remaining < 30:
+                product = snap.get("product", "Unknown SKU")
+                delay_days = max(1, int(30 - days_remaining))
+                subject = f"{product} supply risk at {fac.split('(')[0].strip()} — {days_remaining:.0f}d stock vs 30d target"
+                self.bus.post_blocker(
+                    run_id=run_id,
+                    from_agent=self.agent_name,
+                    subject=subject,
+                    to_agents=["Scheduler"],
+                    payload={
+                        "facility": fac,
+                        "sku": product,
+                        "current_stock": int(current_stock),
+                        "days_remaining": round(days_remaining, 1),
+                        "delay_days": delay_days,
+                        "daily_demand_est": daily_demand,
+                        "reorder_urgency": "HIGH" if days_remaining < 14 else "MEDIUM",
+                        "unit_price": snap.get("unit_price", 5.0),
+                    },
+                )
+                self.publish_signal(
+                    severity="WARNING",
+                    message=f"BLOCKER posted: {subject}",
+                    facility=fac,
+                    confidence_pct=85.0,
+                    action_taken="Coordination blocker posted to Scheduler",
+                    run_id=run_id,
+                )
+                blocker_count += 1
+                if blocker_count >= 2:  # Cap at 2 blockers per run for demo clarity
+                    break
+
+        if blocker_count == 0:
+            # Always post at least one blocker for the facility with the lowest stock
+            if inventory_snap:
+                lowest_fac = min(inventory_snap, key=lambda f: inventory_snap[f]["inventory_units"])
+                snap = inventory_snap[lowest_fac]
+                product = snap.get("product", "Primary Material")
+                subject = f"Proactive inventory review: {product} at {lowest_fac.split('(')[0].strip()} — procurement window analysis required"
+                self.bus.post_blocker(
+                    run_id=run_id,
+                    from_agent=self.agent_name,
+                    subject=subject,
+                    to_agents=["Scheduler"],
+                    payload={
+                        "facility": lowest_fac,
+                        "sku": product,
+                        "current_stock": int(snap["inventory_units"]),
+                        "days_remaining": round(snap["inventory_units"] / max(daily_demand, 1), 1),
+                        "delay_days": 5,
+                        "daily_demand_est": daily_demand,
+                        "reorder_urgency": "LOW",
+                        "unit_price": snap.get("unit_price", 5.0),
+                    },
+                )
+                self.publish_signal(
+                    severity="INFO",
+                    message=f"Proactive coordination signal: {subject}",
+                    facility=lowest_fac,
+                    confidence_pct=70.0,
+                    action_taken="Proactive blocker posted",
+                    run_id=run_id,
+                )
 
     # ── Private helpers ───────────────────────────────────────────────────────
 

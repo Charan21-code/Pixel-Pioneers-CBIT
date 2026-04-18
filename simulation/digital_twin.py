@@ -35,6 +35,7 @@ import numpy as np
 import pandas as pd
 
 import config
+from simulation import twin_ml
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,23 @@ def simulate(
 
     target_qty = int(forecast_qty * (1 + demand_buffer_pct))
 
+    # ── ML correction factor (computed once, applied to every day) ────────────
+    # Uses peak_ratio=0.4 as a reasonable default since we don't have live
+    # timestamp data at simulation time.
+    formula_day_est = int(base_capacity * oee_factor * workforce_factor)
+    ml_correction, ml_confidence = twin_ml.get_correction_factor(
+        facility       = plant_id,
+        oee_pct        = oee_pct,
+        workforce_pct  = workforce_pct,
+        energy_price   = energy_price,
+        downtime_hrs   = downtime_hrs,
+        base_capacity  = base_capacity,
+        demand_buffer_pct = demand_buffer_pct,
+        peak_ratio     = 0.40,
+        formula_output = max(formula_day_est, 1),
+    )
+    ml_active = ml_correction != 1.0
+
     # ── Day-by-day simulation ─────────────────────────────────────────────────
     daily_output    = []
     daily_cost_list = []
@@ -131,6 +149,9 @@ def simulate(
 
         # Day production = base × OEE × workforce × hours available
         day_units = int(base_capacity * oee_factor * workforce_factor * hours_factor)
+
+        # Apply ML correction factor to bring formula into alignment with real data
+        day_units = int(day_units * ml_correction)
 
         # Optimisation adjustments
         if optimise_for == "Cost":
@@ -205,6 +226,10 @@ def simulate(
         "cumulative_breakdown":  list(np.cumsum(daily_output).astype(int)),
         "daily_cost":            daily_cost_list,
         "daily_carbon":          daily_carbon_list,
+        "utilisation_pct":       round(min(100.0, (total_output / max(total_output + shortfall, 1)) * 100), 1),
+        "ml_correction_applied": ml_active,
+        "ml_confidence":         round(ml_confidence, 3),
+        "ml_r2":                 twin_ml.get_model_status().get("r2_score"),
         "parameters_used": {
             "oee_pct":          oee_pct,
             "workforce_pct":    workforce_pct,

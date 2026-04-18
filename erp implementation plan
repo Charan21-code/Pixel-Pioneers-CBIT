@@ -1,0 +1,278 @@
+# ERP Intelligence Layer — Implementation Plan
+
+## Goal
+
+Transform OPS//CORE from a standalone CSV-driven planning system into an **ERP integration layer** that can **Read**, **Write**, **Listen**, and **Explain** against enterprise ERPs (SAP, Oracle, Odoo) — while keeping the current CSV mode as the default demo/fallback.
+
+The sales pitch: *"We don't replace your ERP — we make it intelligent."*
+
+---
+
+## Current Architecture (What We Have)
+
+```mermaid
+graph LR
+    CSV["data.csv (2.5M rows)"] --> LoadDF["_load_df()"]
+    LoadDF --> Orchestrator
+    Orchestrator --> Forecaster & Mechanic & Buyer & Environ & Finance & Scheduler
+    Orchestrator --> Cache["_CACHE → REST API"]
+    Cache --> Frontend
+```
+
+**Key constraint**: Every agent receives `context["df"]` — a pandas DataFrame sliced from `data.csv`. Agents never query the database directly for production data. This is the **single integration point** we need to intercept.
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **This is a demo/hackathon architecture.** We simulate ERP connectivity using a pluggable adapter pattern. A real SAP RFC/BAPI integration requires an SAP account, `pyrfc`, and SAP credentials. This plan creates the **adapter interface + mock adapters** so the architecture is enterprise-ready, and the demo shows a convincing ERP integration flow without requiring actual ERP credentials.
+
+> [!WARNING]
+> **No external ERP accounts are assumed.** The plan uses mock adapters that generate realistic data matching SAP/Odoo schemas. If you have access to an Odoo instance, the Odoo adapter can be made live with minimal changes.
+
+---
+
+## Proposed Changes
+
+### Component 1: ERP Adapter Layer (Backend)
+
+The core abstraction — a pluggable connector that standardises how OPS//CORE talks to any ERP.
+
+---
+
+#### [NEW] [erp_adapter.py](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/backend/erp_adapter.py)
+
+**Abstract base class** defining the 4 capabilities:
+
+```python
+class ERPAdapter(ABC):
+    # ── READ ──
+    def pull_inventory(plant_id) -> list[dict]        # Live stock levels
+    def pull_open_orders(plant_id) -> list[dict]       # Open sales/production orders
+    def pull_bom(product_id) -> dict                   # Bill of Materials
+    def pull_machine_status(plant_id) -> list[dict]    # Machine OEE, temp, vibration
+
+    # ── WRITE ──
+    def push_production_order(order: dict) -> dict     # Create/update prod order in ERP
+    def push_purchase_order(po: dict) -> dict          # Create PO in ERP for reorders
+    
+    # ── LISTEN ──
+    def poll_events(since: datetime) -> list[dict]     # Poll for new ERP events
+    
+    # ── EXPLAIN ──
+    def generate_audit_link(action_id: str) -> str     # Deep-link back to OPS//CORE rationale
+```
+
+Each method returns standardised dicts regardless of which ERP is behind it.
+
+---
+
+#### [NEW] [erp_csv_adapter.py](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/backend/erp_csv_adapter.py)
+
+**Default adapter** — wraps the existing `data.csv` pipeline to match the `ERPAdapter` interface. This is what runs today; we just formalise it behind the adapter contract.
+
+- `pull_inventory()` → extracts `Raw_Material_Inventory_Units`, `Inventory_Threshold` from df
+- `pull_open_orders()` → extracts `Order_ID`, `Actual_Order_Qty`, `Schedule_Status` from df
+- `pull_machine_status()` → extracts `Machine_OEE_Pct`, `Machine_Temperature_C`, `Predicted_Time_To_Failure_Hrs`
+- `push_production_order()` → logs to `agent_events` table (simulated write-back)
+- `poll_events()` → returns empty list (CSV is static)
+
+---
+
+#### [NEW] [erp_sap_mock.py](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/backend/erp_sap_mock.py)
+
+**SAP Mock Adapter** — simulates SAP S/4HANA responses with realistic field names:
+
+- Uses SAP-style document numbers (e.g., `4500012345` for POs, `000060001234` for production orders)
+- Returns SAP-style structures: `AUFNR`, `MATNR`, `WERKS`, `LGORT`, `MEINS`
+- `push_production_order()` → generates a mock `AFKO` record with idempotency key
+- `poll_events()` → returns simulated IDoc-style events (new sales order, goods receipt, PO confirmation) with realistic timestamps
+- Logs every write to `erp_audit_log` SQLite table with full before/after payload
+
+---
+
+#### [NEW] [erp_odoo_mock.py](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/backend/erp_odoo_mock.py)
+
+**Odoo Mock Adapter** — simulates Odoo XML-RPC responses:
+
+- Uses Odoo-style model names: `mrp.production`, `purchase.order`, `stock.quant`
+- Returns JSON matching Odoo's `read()` API format
+- `poll_events()` → simulates `mail.message` webhook notifications
+
+---
+
+### Component 2: ERP Audit Trail & Explain
+
+Every action OPS//CORE pushes to the ERP is logged with full rationale traceability.
+
+---
+
+#### [NEW] [erp_audit.py](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/backend/erp_audit.py)
+
+- New SQLite table `erp_audit_log`:
+  ```
+  id, timestamp, erp_type, action_type, document_id, idempotency_key,
+  agent_name, run_id, rationale, payload_before, payload_after, status, erp_response
+  ```
+- **Idempotency**: Before every write, check if `idempotency_key` already exists → skip duplicate pushes
+- **Rationale link**: Every audit row stores the `run_id` + `agent_name` so the frontend can deep-link to the Agent Reasoning page showing exactly why the decision was made
+- `generate_explain_url(audit_id)` → returns `/agent-reasoning?run_id=xxx&highlight=agent`
+
+---
+
+### Component 3: Event Listener (Backend)
+
+Subscribes to ERP events and triggers re-planning when relevant changes occur.
+
+---
+
+#### [NEW] [erp_listener.py](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/backend/erp_listener.py)
+
+- Background async loop (similar to `_agent_loop`) that polls `adapter.poll_events()` every N seconds
+- Event types handled:
+  | ERP Event | OPS//CORE Action |
+  |---|---|
+  | New Sales Order | Trigger Forecaster re-run, update demand context |
+  | Goods Receipt | Update inventory levels, cancel pending reorders |
+  | PO Confirmation | Mark Buyer reorder as fulfilled |
+  | Machine Status Change | Trigger Mechanic re-assessment |
+- Each event is logged to a new `erp_events` SQLite table
+- Events that require re-planning set a flag that the `_agent_loop` checks
+
+---
+
+### Component 4: Backend Integration
+
+Wire the adapter into the existing orchestrator and API layer.
+
+---
+
+#### [MODIFY] [config.py](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/config.py)
+
+Add new config section:
+```python
+ERP = {
+    "adapter": "csv",           # "csv" | "sap_mock" | "odoo_mock"
+    "poll_interval_secs": 30,   # How often to poll for ERP events
+    "write_enabled": True,      # Safety switch to disable ERP writes
+    "idempotency_window_hrs": 24,
+    "audit_retention_days": 90,
+}
+```
+
+#### [MODIFY] [main.py](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/backend/main.py)
+
+- **Startup**: Instantiate the correct adapter based on `config.ERP["adapter"]`; store in `_CACHE["erp_adapter"]`
+- **Startup**: Launch `erp_listener` background loop alongside `_agent_loop`
+- **New endpoints**:
+  | Method | Path | Description |
+  |---|---|---|
+  | `GET` | `/api/erp/status` | Adapter type, connection health, last poll time |
+  | `GET` | `/api/erp/audit` | Paginated audit log with rationale links |
+  | `GET` | `/api/erp/audit/{id}` | Single audit entry with full before/after |
+  | `GET` | `/api/erp/events` | Recent ERP events received |
+  | `POST` | `/api/erp/push-order` | Manually push a production order to ERP |
+  | `POST` | `/api/erp/switch` | Switch adapter at runtime (csv ↔ sap_mock ↔ odoo_mock) |
+
+#### [MODIFY] [orchestrator.py](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/agents/orchestrator.py)
+
+- After Scheduler produces a shift plan, if `config.ERP["write_enabled"]`:
+  - Call `adapter.push_production_order()` for each scheduled production run
+  - Log every push to `erp_audit_log` with the agent rationale chain
+- After Buyer triggers a reorder, if write_enabled:
+  - Call `adapter.push_purchase_order()` for approved POs
+- Pass `erp_adapter` reference through `context["erp_adapter"]` so agents can use it
+
+---
+
+### Component 5: Frontend — ERP Integration Dashboard
+
+A new page that visualises the entire ERP ↔ OPS//CORE data flow.
+
+---
+
+#### [NEW] [ERPIntegration.jsx](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/frontend/src/pages/ERPIntegration.jsx)
+
+**Layout**: Full-width page with 4 sections matching the 4 capabilities:
+
+1. **Connection Status Banner** (top)
+   - Shows active adapter (SAP / Oracle / Odoo / CSV)
+   - Connection health indicator (green/amber/red)
+   - Toggle switch to change adapter at runtime
+   - Last poll timestamp
+
+2. **📥 READ Panel** (left column)
+   - Live data cards showing what was pulled from ERP:
+     - Inventory levels per plant
+     - Open orders count
+     - Machine status summary
+   - "Last synced" timestamp per data type
+   - Animated pulse when fresh data arrives
+
+3. **📤 WRITE Panel** (right column)
+   - Feed of production orders pushed to ERP
+   - Each entry shows: document ID, plant, qty, status badge (pending/confirmed/failed)
+   - "Explain" button on each entry → opens a drawer showing the full agent rationale chain
+   - Idempotency indicator (shows if a duplicate push was prevented)
+
+4. **📡 LISTEN Panel** (bottom-left)
+   - Live feed of events received from ERP
+   - Event type badges: `NEW_ORDER`, `GOODS_RECEIPT`, `PO_CONFIRM`, `MACHINE_ALERT`
+   - Shows which agent was triggered by each event
+   - Timeline visualisation
+
+5. **🔍 EXPLAIN / Audit Trail** (bottom-right)
+   - Searchable audit log table
+   - Each row: timestamp, action, document ID, agent, rationale summary
+   - Click → full detail drawer with before/after JSON diff and link to Agent Reasoning
+
+#### [NEW] [ERPIntegration.css](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/frontend/src/pages/ERPIntegration.css)
+
+Styling consistent with the existing tactical-brutalism design system.
+
+#### [MODIFY] [App.jsx](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/frontend/src/App.jsx)
+
+- Add new route: `{ path: '/erp', label: 'ERP Integration', Icon: Database, section: 'INTEGRATION' }`
+- New sidebar section "INTEGRATION" above "CONTROL"
+
+#### [MODIFY] [client.js](file:///c:/Users/Charan/OneDrive/Desktop/Projects/CBIT/frontend/src/api/client.js)
+
+Add API client methods:
+```javascript
+export const getErpStatus    = ()     => api.get('/erp/status')
+export const getErpAudit     = (p={}) => api.get('/erp/audit', { params: p })
+export const getErpAuditById = (id)   => api.get(`/erp/audit/${id}`)
+export const getErpEvents    = (p={}) => api.get('/erp/events', { params: p })
+export const pushErpOrder    = (body) => api.post('/erp/push-order', body)
+export const switchErpAdapter = (body) => api.post('/erp/switch', body)
+```
+
+---
+
+## Open Questions
+
+> [!IMPORTANT]
+> **Adapter choice for demo**: The plan creates all 3 adapters (CSV, SAP Mock, Odoo Mock). During demo, which should be the **default startup adapter**? Options:
+> - **CSV** (current behaviour, zero risk) — switch to SAP mock via the UI toggle
+> - **SAP Mock** (more impressive for judges) — shows SAP document numbers immediately
+
+> [!IMPORTANT]
+> **Write-back scope**: Should the Orchestrator automatically push production orders after every agent run, or should it require explicit HITL approval first? The plan currently auto-pushes with an audit trail, but we can add a "staging" mode where orders are queued for human review before ERP push.
+
+---
+
+## Verification Plan
+
+### Automated Tests
+1. `python -m pytest tests/test_erp_adapters.py` — unit tests for each adapter's read/write/listen/explain methods
+2. `npx vite build` — frontend compiles without errors
+3. Backend startup test — verify adapter loads, listener starts, and `/api/erp/status` returns healthy
+
+### Manual Verification
+1. Start backend → verify SAP mock adapter connects and generates realistic events
+2. Run orchestrator → verify production orders appear in audit log with rationale links
+3. Open `/erp` page → verify all 4 panels render with live data
+4. Click "Explain" on an audit entry → verify it deep-links to Agent Reasoning with the correct run highlighted
+5. Switch adapter via UI toggle → verify seamless transition between CSV ↔ SAP Mock
+6. Trigger a mock "New Sales Order" event → verify it cascades through the listener to trigger a Forecaster re-run

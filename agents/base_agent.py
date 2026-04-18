@@ -43,10 +43,12 @@ import uuid
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Optional
 
 import httpx
 
 import config
+from agents.coordination_bus import CoordinationBus
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,7 @@ class BaseAgent(ABC):
         self.agent_name = agent_name
         self.db_path    = db_path
         self._init_db()
+        self.bus        = CoordinationBus(db_path)
 
     # ── Internal DB helpers ───────────────────────────────────────────────────
 
@@ -86,6 +89,7 @@ class BaseAgent(ABC):
                 CREATE TABLE IF NOT EXISTS agent_events (
                     log_id         INTEGER PRIMARY KEY AUTOINCREMENT,
                     logged_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    run_id         TEXT,
                     agent_name     TEXT     NOT NULL,
                     severity       TEXT     CHECK (severity IN ('INFO', 'WARNING', 'CRITICAL')),
                     order_id       TEXT,
@@ -95,6 +99,11 @@ class BaseAgent(ABC):
                     action_taken   TEXT
                 )
             """)
+            # Migration: add run_id column if it doesn't exist (idempotent)
+            try:
+                conn.execute("ALTER TABLE agent_events ADD COLUMN run_id TEXT")
+            except Exception:
+                pass  # column already exists
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS hitl_queue (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -123,10 +132,11 @@ class BaseAgent(ABC):
         self,
         severity:       str,
         message:        str,
-        order_id:       str  = None,
-        facility:       str  = None,
+        order_id:       str   = None,
+        facility:       str   = None,
         confidence_pct: float = 0.0,
-        action_taken:   str  = None,
+        action_taken:   str   = None,
+        run_id:         Optional[str] = None,
     ):
         """
         Write one row to agent_events.
@@ -139,16 +149,18 @@ class BaseAgent(ABC):
         facility       : (optional) related facility name.
         confidence_pct : 0–100 confidence in the signal.
         action_taken   : Short description of the action being taken.
+        run_id         : (optional) UUID of the orchestrator run — used by the
+                         frontend to scope log entries to the current run only.
         """
         with self._get_conn() as conn:
             conn.execute(
                 """
                 INSERT INTO agent_events
-                    (agent_name, severity, order_id, facility_id,
+                    (run_id, agent_name, severity, order_id, facility_id,
                      message, confidence_pct, action_taken)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (self.agent_name, severity, order_id, facility,
+                (run_id, self.agent_name, severity, order_id, facility,
                  message, confidence_pct, action_taken),
             )
             conn.commit()
