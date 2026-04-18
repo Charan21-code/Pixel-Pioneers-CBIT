@@ -5,8 +5,16 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import * as api from '../api/client'
+import { useUiConfig } from '../ui-config'
 
-const GRID_COLORS = { Peak: '#FF1744', 'Off-Peak': '#00E676', peak: '#FF1744', off_peak: '#00E676' }
+const GRID_COLORS = { Peak: 'var(--red)', 'Off-Peak': 'var(--green)', peak: 'var(--red)', off_peak: 'var(--green)' }
+const CHART_TOOLTIP_STYLE = {
+  background: 'var(--bg-card)',
+  border: '1px solid rgba(240, 238, 232, 0.1)',
+  borderRadius: 12,
+  fontSize: 12,
+  boxShadow: '0 10px 24px rgba(0,0,0,0.45)',
+}
 
 const parseChartDate = (value) => {
   if (!value) return null
@@ -34,9 +42,12 @@ const formatFullValue = (value) =>
   Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })
 
 export default function CarbonEnergy() {
+  const { uiConfig } = useUiConfig()
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
+
+  const carbonConfig = uiConfig.carbon || {}
 
   const load = useCallback(async () => {
     setError(null)
@@ -57,7 +68,7 @@ export default function CarbonEnergy() {
   const facilities  = data?.facility_penalties || []
   const energySeries = data?.energy_time_series || []
   const suggestions = data?.shift_suggestions || []
-  const trendWindow = 14
+  const trendWindow = carbonConfig.trend_window_days || 14
   const energyChartSeries = energySeries.map((point, index, series) => {
     const kwh = Number(point?.kwh || 0)
     const windowStart = Math.max(0, index - trendWindow + 1)
@@ -72,9 +83,9 @@ export default function CarbonEnergy() {
   })
   const energyPointCount = energyChartSeries.length
   const energyTickValues = energyPointCount > 1
-    ? Array.from({ length: Math.min(7, energyPointCount) }, (_, idx) => {
+    ? Array.from({ length: Math.min(carbonConfig.max_energy_ticks || 7, energyPointCount) }, (_, idx) => {
         const lastIndex = energyPointCount - 1
-        const pointIndex = Math.round((idx * lastIndex) / Math.max(1, Math.min(7, energyPointCount) - 1))
+        const pointIndex = Math.round((idx * lastIndex) / Math.max(1, Math.min(carbonConfig.max_energy_ticks || 7, energyPointCount) - 1))
         return energyChartSeries[pointIndex]?.date
       }).filter((value, idx, arr) => value && arr.indexOf(value) === idx)
     : energyChartSeries.map(point => point.date)
@@ -159,7 +170,7 @@ export default function CarbonEnergy() {
                   <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--text-muted)', marginBottom:4 }}>Peak Day</div>
                   <div style={{ fontSize:14, fontWeight:600, color:'var(--amber)' }}>{formatCompactValue(peakEnergyPoint?.kwh || 0)} kWh</div>
                 </div>
-                <div style={{ padding:'8px 10px', borderRadius:12, background:'rgba(56,189,248,0.08)', border:'1px solid rgba(56,189,248,0.16)' }}>
+                <div style={{ padding:'8px 10px', borderRadius:12, background:'rgba(255,184,48,0.08)', border:'1px solid rgba(255,184,48,0.16)' }}>
                   <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--text-muted)', marginBottom:4 }}>Latest</div>
                   <div style={{ fontSize:14, fontWeight:600, color:'var(--cyan)' }}>{formatCompactValue(latestEnergyPoint?.kwh || 0)} kWh</div>
                 </div>
@@ -170,8 +181,8 @@ export default function CarbonEnergy() {
               <ComposedChart data={energyChartSeries} margin={{ top:10, right:16, left:4, bottom:18 }}>
                 <defs>
                   <linearGradient id="nrgGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#FBBF24" stopOpacity={0.18} />
-                    <stop offset="100%" stopColor="#FBBF24" stopOpacity={0.02} />
+                    <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.18} />
+                    <stop offset="100%" stopColor="var(--primary)" stopOpacity={0.02} />
                   </linearGradient>
                   <filter id="nrgGlow" x="-20%" y="-20%" width="140%" height="140%">
                     <feGaussianBlur stdDeviation="3" result="blur" />
@@ -181,7 +192,7 @@ export default function CarbonEnergy() {
                     </feMerge>
                   </filter>
                 </defs>
-                <CartesianGrid strokeDasharray="2 4" stroke="#253347" strokeOpacity={0.45} vertical={false} />
+                <CartesianGrid strokeDasharray="2 4" stroke="var(--chart-grid)" strokeOpacity={0.45} vertical={false} />
                 <XAxis
                   dataKey="date"
                   ticks={energyTickValues}
@@ -206,7 +217,7 @@ export default function CarbonEnergy() {
                 />
                 <Tooltip
                   cursor={{ stroke:'rgba(255,255,255,0.2)', strokeDasharray:'4 4' }}
-                  contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:12, fontSize:12, boxShadow:'0 10px 24px rgba(0,0,0,0.45)' }}
+                  contentStyle={CHART_TOOLTIP_STYLE}
                   labelFormatter={value => formatChartDate(value, { day:'numeric', month:'short', year:'numeric' })}
                   formatter={(value, name) => [
                     `${formatFullValue(value)} kWh`,
@@ -217,7 +228,7 @@ export default function CarbonEnergy() {
                   type="monotone"
                   dataKey="kwh"
                   name="kwh"
-                  stroke="#FCD34D"
+                  stroke="var(--primary-bright)"
                   strokeOpacity={0.2}
                   strokeWidth={1.5}
                   fill="url(#nrgGrad)"
@@ -229,10 +240,10 @@ export default function CarbonEnergy() {
                   type="monotone"
                   dataKey="trend"
                   name="trend"
-                  stroke="#F59E0B"
+                  stroke="var(--primary-dim)"
                   strokeWidth={3}
                   dot={false}
-                  activeDot={{ r:5, strokeWidth:0, fill:'#FCD34D' }}
+                  activeDot={{ r:5, strokeWidth:0, fill:'var(--primary-bright)' }}
                   filter="url(#nrgGlow)"
                   animationDuration={600}
                 />
@@ -245,13 +256,13 @@ export default function CarbonEnergy() {
           <div className="chart-title">⚡ Peak vs Off-Peak Energy Split</div>
           {pieData.length > 0 ? (
             <ResponsiveContainer width="100%" height={240}>
-            <PieChart>
+              <PieChart>
               <Pie data={pieData} cx="50%" cy="45%" innerRadius={50} outerRadius={90} dataKey="value" paddingAngle={3} label={({ name, percent }) => `${(percent*100).toFixed(0)}%`} labelLine={true} animationDuration={600}>
                 {pieData.map((entry,i) => (
-                  <Cell key={i} fill={GRID_COLORS[entry.name] || '#888'} />
+                  <Cell key={i} fill={GRID_COLORS[entry.name] || 'var(--text-muted)'} />
                 ))}
               </Pie>
-              <Tooltip contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }} formatter={v=>[v.toLocaleString(),'kWh']} />
+              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={v=>[v.toLocaleString(),'kWh']} />
               <Legend wrapperStyle={{ fontSize:11, paddingTop:8 }} />
             </PieChart>
           </ResponsiveContainer>
@@ -267,10 +278,10 @@ export default function CarbonEnergy() {
           <div className="chart-title">🏭 Carbon Penalty by Facility</div>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={facilities} margin={{ top:10, right:20, left:10, bottom:30 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.8} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" strokeOpacity={0.8} />
                 <XAxis dataKey="facility" tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} angle={-20} textAnchor="end" height={40} tickFormatter={v=>v.split('(')[0].trim()} />
                 <YAxis tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} axisLine={false} width={72} tickFormatter={v=>`$${v.toLocaleString()}`} />
-                <Tooltip contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }} formatter={v=>[`$${v.toLocaleString()}`,'Penalty']} />
+                <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={v=>[`$${v.toLocaleString()}`,'Penalty']} />
                 <Bar dataKey="total_penalty" name="Carbon Penalty" fill="var(--red)" radius={[4,4,0,0]} opacity={0.8} animationDuration={600} />
               </BarChart>
             </ResponsiveContainer>

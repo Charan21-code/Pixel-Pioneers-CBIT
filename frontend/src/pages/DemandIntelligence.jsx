@@ -5,13 +5,23 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine
 } from 'recharts'
 import * as api from '../api/client'
+import { useUiConfig } from '../ui-config'
 
-const FACILITIES_COLORS = ['#00E5FF', '#FFB300', '#00E676', '#7C3AED', '#FF1744', '#FF6D00']
+const CHART_TOOLTIP_STYLE = {
+  background: 'var(--bg-card)',
+  border: '1px solid rgba(240, 238, 232, 0.1)',
+  borderRadius: 12,
+  fontSize: 12,
+  boxShadow: '0 10px 24px rgba(0,0,0,0.45)',
+}
 
 export default function DemandIntelligence() {
+  const { uiConfig } = useUiConfig()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  const demandConfig = uiConfig.demand || {}
 
   const load = useCallback(async () => {
     setError(null)
@@ -32,6 +42,8 @@ export default function DemandIntelligence() {
   const anomaly = data?.anomaly_count || 0
   const risk = data?.risk_level || 'low'
   const sched = data?.schedule_status || {}
+  const horizonDays = data?.horizon_days || demandConfig.forecast_horizon_days || 7
+  const facilityColors = demandConfig.facility_palette || ['var(--primary)', 'var(--signal)', 'var(--tertiary)', '#D8922C', 'var(--red)', '#8D6422']
 
   const riskColor = risk === 'high' ? 'var(--red)' : risk === 'medium' ? 'var(--amber)' : 'var(--green)'
 
@@ -40,7 +52,7 @@ export default function DemandIntelligence() {
       {/* KPIs */}
       <div className="kpi-grid">
         <div className="kpi-card" style={{ '--accent-color': 'var(--cyan)' }}>
-          <div className="kpi-label">7-Day Forecast</div>
+          <div className="kpi-label">{horizonDays}-Day Forecast</div>
           <div className="kpi-value">{forecast.toLocaleString()}</div>
           <div className="kpi-delta">units demand projected</div>
         </div>
@@ -104,7 +116,7 @@ export default function DemandIntelligence() {
           .map(w => ({ date: w.date, qty: Math.round(w.total / w.count) }))
 
         // Compute 4-week moving average for trend overlay
-        const maWindow = 4
+        const maWindow = demandConfig.moving_average_weeks || 4
         const weeklyWithMA = weekly.map((row, i) => {
           if (i < maWindow - 1) return { ...row, ma: null }
           const slice = weekly.slice(i - maWindow + 1, i + 1)
@@ -113,7 +125,7 @@ export default function DemandIntelligence() {
         })
 
         // Show ~14 evenly-spaced x-axis ticks
-        const tickInterval = Math.max(1, Math.floor(weeklyWithMA.length / 14))
+        const tickInterval = Math.max(1, Math.floor(weeklyWithMA.length / (demandConfig.overview_tick_target || 14)))
 
         return (
           <div className="chart-container">
@@ -122,11 +134,11 @@ export default function DemandIntelligence() {
               <AreaChart data={weeklyWithMA} margin={{ top: 10, right: 20, left: 10, bottom: 30 }}>
                 <defs>
                   <linearGradient id="demGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#00E5FF" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#00E5FF" stopOpacity={0} />
+                    <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.6} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" strokeOpacity={0.6} />
                 <XAxis
                   dataKey="date"
                   tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'monospace' }}
@@ -144,14 +156,14 @@ export default function DemandIntelligence() {
                   tickFormatter={v => v.toLocaleString()}
                 />
                 <Tooltip
-                  contentStyle={{ background: '#111827', border: '1px solid #253347', borderRadius: 8, fontSize: 12, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}
+                  contentStyle={CHART_TOOLTIP_STYLE}
                   labelStyle={{ color: 'var(--text-secondary)' }}
                   formatter={(v, name) => [v?.toLocaleString(), name === 'qty' ? 'Weekly Avg Units' : '4-Wk Trend']}
                 />
                 <Area
                   type="basis"
                   dataKey="qty"
-                  stroke="#00E5FF"
+                  stroke="var(--primary)"
                   strokeWidth={2}
                   fill="url(#demGrad)"
                   dot={false}
@@ -160,7 +172,7 @@ export default function DemandIntelligence() {
                 <Line
                   type="basis"
                   dataKey="ma"
-                  stroke="#FFB300"
+                  stroke="var(--signal)"
                   strokeWidth={2}
                   dot={false}
                   strokeDasharray="6 3"
@@ -190,14 +202,14 @@ export default function DemandIntelligence() {
         const merged = Object.values(dateMap).sort((a, b) => new Date(a.date) - new Date(b.date))
         const facKeys = facilities.map(f => f.split('(')[0].trim())
         // Show ~10 ticks on X axis
-        const tickInterval = Math.max(1, Math.floor(merged.length / 10))
+        const tickInterval = Math.max(1, Math.floor(merged.length / (demandConfig.facility_tick_target || 10)))
 
         return (
           <div className="chart-container">
             <div className="chart-title">📊 Per-Facility Weekly Demand</div>
             <ResponsiveContainer width="100%" height={320}>
               <LineChart data={merged} margin={{ top: 10, right: 20, left: 10, bottom: 40 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.8} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" strokeOpacity={0.8} />
                 <XAxis
                   dataKey="date"
                   tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
@@ -215,7 +227,7 @@ export default function DemandIntelligence() {
                   tickFormatter={v => v.toLocaleString()}
                 />
                 <Tooltip
-                  contentStyle={{ background: '#111827', border: '1px solid #253347', borderRadius: 8, fontSize: 12, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}
+                  contentStyle={CHART_TOOLTIP_STYLE}
                   formatter={(v, name) => [v?.toLocaleString(), name]}
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
@@ -224,7 +236,7 @@ export default function DemandIntelligence() {
                     key={key}
                     dataKey={key}
                     name={key}
-                    stroke={FACILITIES_COLORS[i % FACILITIES_COLORS.length]}
+                    stroke={facilityColors[i % facilityColors.length]}
                     strokeWidth={1.5}
                     dot={false}
                     connectNulls
@@ -263,7 +275,7 @@ export default function DemandIntelligence() {
         <div className="card">
           <div className="card-header"><div className="card-title">🎯 Forecaster Diagnostics</div></div>
           <div className="stat-row">
-            <span className="stat-row-label">7-Day Forecast Qty</span>
+            <span className="stat-row-label">{horizonDays}-Day Forecast Qty</span>
             <span className="stat-row-value">{forecast.toLocaleString()} units</span>
           </div>
           <div className="stat-row">
@@ -278,7 +290,7 @@ export default function DemandIntelligence() {
           </div>
           <div className="stat-row">
             <span className="stat-row-label">Horizon Days</span>
-            <span className="stat-row-value">{data?.horizon_days || 7}</span>
+            <span className="stat-row-value">{horizonDays}</span>
           </div>
           <div className="stat-row">
             <span className="stat-row-label">Risk Level</span>

@@ -5,6 +5,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import * as api from '../api/client'
+import { useUiConfig } from '../ui-config'
 
 const STATUS_COLOR = {
   healthy:   'var(--green)',
@@ -20,12 +21,24 @@ const STATUS_BADGE = {
   emergency: 'badge-critical',
 }
 
-function InventoryCard({ plant, inv }) {
+const CHART_TOOLTIP_STYLE = {
+  background: 'var(--bg-card)',
+  border: '1px solid rgba(240, 238, 232, 0.1)',
+  borderRadius: 12,
+  fontSize: 12,
+  boxShadow: '0 10px 24px rgba(0,0,0,0.45)',
+}
+
+function InventoryCard({ plant, inv, thresholds }) {
   const color  = STATUS_COLOR[inv.status] || 'var(--text-muted)'
   const pct    = inv.inventory_threshold > 0
     ? Math.min(100, (inv.current_stock / inv.inventory_threshold) * 100)
     : 0
-  const fillColor = pct > 80 ? 'var(--green)' : pct > 40 ? 'var(--amber)' : 'var(--red)'
+  const fillColor = pct > (thresholds?.stock_healthy_pct ?? 80)
+    ? 'var(--green)'
+    : pct > (thresholds?.stock_warning_pct ?? 40)
+      ? 'var(--amber)'
+      : 'var(--red)'
 
   return (
     <div className="card" style={{ borderTopColor: color, borderTop: `3px solid ${color}` }}>
@@ -85,9 +98,12 @@ function InventoryCard({ plant, inv }) {
 }
 
 export default function InventoryLogistics() {
+  const { uiConfig } = useUiConfig()
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
+
+  const inventoryConfig = uiConfig.inventory || {}
 
   const load = useCallback(async () => {
     setError(null)
@@ -176,16 +192,16 @@ export default function InventoryLogistics() {
       {/* Inventory by plant bar chart */}
       {barData.length > 0 && (
         <div className="chart-container">
-          <div className="chart-title">📊 Inventory Stock vs Threshold by Plant</div>
+            <div className="chart-title">📊 Inventory Stock vs Threshold by Plant</div>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={barData} margin={{ top:10, right:20, left:10, bottom:30 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.8} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" strokeOpacity={0.8} />
               <XAxis dataKey="plant" tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} angle={-20} textAnchor="end" height={40} />
               <YAxis tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} axisLine={false} width={80} tickFormatter={v => v.toLocaleString()} />
-              <Tooltip contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }} formatter={v=>[v.toLocaleString(),'units']} />
+              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={v=>[v.toLocaleString(),'units']} />
               <Legend wrapperStyle={{ fontSize:11, paddingTop:8 }} />
               <Bar dataKey="stock" name="Current Stock" fill="var(--cyan)" radius={[4,4,0,0]} animationDuration={600} />
-              <Bar dataKey="threshold" name="Safety Threshold" fill="#2A3A52" stroke="#3A4E6A" strokeWidth={1} radius={[4,4,0,0]} animationDuration={600} />
+              <Bar dataKey="threshold" name="Safety Threshold" fill="rgba(240, 238, 232, 0.08)" stroke="rgba(240, 238, 232, 0.14)" strokeWidth={1} radius={[4,4,0,0]} animationDuration={600} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -200,16 +216,16 @@ export default function InventoryLogistics() {
               <AreaChart data={quotes} margin={{ top:10, right:20, left:10, bottom:30 }}>
                 <defs>
                   <linearGradient id="quoteGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#7C3AED" stopOpacity={0.45} />
-                    <stop offset="95%" stopColor="#7C3AED" stopOpacity={0.02} />
+                    <stop offset="5%"  stopColor="var(--signal)" stopOpacity={0.45} />
+                    <stop offset="95%" stopColor="var(--signal)" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.6} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" strokeOpacity={0.6} />
                 <XAxis
                   dataKey="date"
                   tick={{ fontSize:9, fill:'var(--text-muted)', fontFamily:'monospace' }}
                   tickLine={false}
-                  interval={Math.max(0, Math.floor(quotes.length / 8) - 1)}
+                  interval={Math.max(0, Math.floor(quotes.length / (inventoryConfig.quote_tick_target ?? 8)) - 1)}
                   angle={-30}
                   textAnchor="end"
                   height={45}
@@ -222,19 +238,19 @@ export default function InventoryLogistics() {
                   tickFormatter={v => `$${v.toFixed(2)}`}
                 />
                 <Tooltip
-                  contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }}
+                  contentStyle={CHART_TOOLTIP_STYLE}
                   formatter={v => [`$${v.toFixed(4)}`, 'Avg Quote (USD/unit)']}
                   labelFormatter={label => `Week of ${label}`}
                 />
                 <Area
                   type="monotoneX"
                   dataKey="quote"
-                  stroke="#7C3AED"
+                  stroke="var(--signal)"
                   strokeWidth={2.5}
                   fill="url(#quoteGrad)"
                   dot={false}
-                  activeDot={{ r: 4, fill: '#7C3AED', strokeWidth: 0 }}
-                  animationDuration={800}
+                  activeDot={{ r: 4, fill: 'var(--signal)', strokeWidth: 0 }}
+                  animationDuration={inventoryConfig.quote_animation_ms ?? 800}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -253,9 +269,13 @@ export default function InventoryLogistics() {
                   <th>Facility</th><th>Qty</th><th>Cost</th><th>Decision</th>
                 </tr></thead>
                 <tbody>
-                  {reorders.slice(0,10).map((r, i) => {
+                  {reorders.slice(0, inventoryConfig.reorders_display ?? 10).map((r, i) => {
                     const dec = r.clearance_decision || 'pending'
-                    const decColor = dec === 'auto_approve' ? 'var(--green)' : dec === 'hitl_escalate' ? 'var(--red)' : 'var(--amber)'
+                    const decColor = (inventoryConfig.approved_decisions || ['auto_approve']).includes(dec)
+                      ? 'var(--green)'
+                      : (inventoryConfig.blocked_decisions || ['hitl_escalate', 'auto_reject']).includes(dec)
+                        ? 'var(--red)'
+                        : 'var(--amber)'
                     return (
                       <tr key={i}>
                         <td>{String(r.facility || '—').split('(')[0].trim()}</td>
@@ -279,7 +299,7 @@ export default function InventoryLogistics() {
       {/* Per-Plant Inventory Cards */}
       <div className="section-title" style={{ marginTop:20 }}>📦 Per-Plant Inventory Detail</div>
       <div className="three-col">
-        {plants.map(p => <InventoryCard key={p} plant={p} inv={inv[p]} />)}
+        {plants.map(p => <InventoryCard key={p} plant={p} inv={inv[p]} thresholds={inventoryConfig} />)}
       </div>
     </div>
   )

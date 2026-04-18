@@ -1,6 +1,9 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api', timeout: 120000 })
+const baseURL = import.meta.env.VITE_API_BASE || '/api'
+const timeout = Number(import.meta.env.VITE_API_TIMEOUT_MS || 120000)
+
+const api = axios.create({ baseURL, timeout })
 
 api.interceptors.response.use(
   res => res.data,
@@ -11,6 +14,7 @@ api.interceptors.response.use(
 )
 
 export const health           = ()          => api.get('/health')
+export const getUiConfig      = ()          => api.get('/ui-config')
 export const runOrchestratorSync = ()       => api.get('/orchestrator/run-sync')
 export const triggerOrchestrator = ()       => api.post('/orchestrator/run')
 export const getOrchestratorOutput = ()     => api.get('/orchestrator/output')

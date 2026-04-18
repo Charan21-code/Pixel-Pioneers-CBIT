@@ -264,6 +264,12 @@ def health_check():
     }
 
 
+@app.get("/api/ui-config")
+def get_ui_config():
+    """Canonical UI-facing thresholds, limits, and timings sourced from config.py."""
+    return _json_safe(config.UI)
+
+
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
 @app.post("/api/orchestrator/run")

@@ -6,6 +6,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine
 } from 'recharts'
 import * as api from '../api/client'
+import { useUiConfig } from '../ui-config'
 
 // Aggregate dense daily time-series into weekly averages to avoid the
 // "scattered spike" look caused by hundreds of raw data points.
@@ -28,13 +29,22 @@ function toWeeklyAvg(rows) {
     .map(b => ({ week: b.week, qty: Math.round(b.total / b.count) }))
 }
 
-const COLORS = ['#00E5FF','#FFB300','#00E676','#7C3AED','#FF1744','#FF6D00']
+const CHART_TOOLTIP_STYLE = {
+  background: 'var(--bg-card)',
+  border: '1px solid rgba(240, 238, 232, 0.1)',
+  borderRadius: 12,
+  fontSize: 12,
+  boxShadow: '0 10px 24px rgba(0,0,0,0.45)',
+}
 
 export default function ProductionPlan() {
+  const { uiConfig } = useUiConfig()
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
   const [selPlant, setSelPlant] = useState(null)
+
+  const productionConfig = uiConfig.production || {}
 
   const load = useCallback(async () => {
     setError(null)
@@ -88,7 +98,7 @@ export default function ProductionPlan() {
           <div className="kpi-delta">units planned across all plants</div>
           <BarChart2 size={22} className="kpi-icon" />
         </div>
-        <div className="kpi-card" style={{ '--accent-color': avgUtil >= 90 ? 'var(--green)' : avgUtil >= 70 ? 'var(--amber)' : 'var(--red)' }}>
+        <div className="kpi-card" style={{ '--accent-color': avgUtil >= (productionConfig.util_nominal_min ?? 90) ? 'var(--green)' : avgUtil >= (productionConfig.util_warning_min ?? 70) ? 'var(--amber)' : 'var(--red)' }}>
           <div className="kpi-label">Avg Utilisation</div>
           <div className="kpi-value">{avgUtil.toFixed(1)}%</div>
           <div className="kpi-delta">across {plans.length} plants</div>
@@ -116,13 +126,13 @@ export default function ProductionPlan() {
         <div className="chart-title">📊 Plant Utilisation & Throughput</div>
         <ResponsiveContainer width="100%" height={280}>
           <BarChart data={utilData} margin={{ top:10, right:20, left:10, bottom:30 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.8} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" strokeOpacity={0.8} />
             <XAxis dataKey="plant" tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} angle={-20} textAnchor="end" height={40} />
             <YAxis yAxisId="left" tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} axisLine={false} width={48} unit="%" />
             <YAxis yAxisId="right" orientation="right" tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} axisLine={false} width={80} tickFormatter={v=>v.toLocaleString()} />
-            <Tooltip contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }} />
+            <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
             <Legend wrapperStyle={{ fontSize:11, paddingTop:8 }} />
-            <ReferenceLine yAxisId="left" y={90} stroke="var(--green)" strokeDasharray="4 2" label={{ value:'Target 90%', fill:'var(--green)', fontSize:10, position:'insideTopRight' }} />
+            <ReferenceLine yAxisId="left" y={productionConfig.target_utilisation_pct ?? 90} stroke="var(--green)" strokeDasharray="4 2" label={{ value:`Target ${productionConfig.target_utilisation_pct ?? 90}%`, fill:'var(--green)', fontSize:10, position:'insideTopRight' }} />
             <Bar yAxisId="left"  dataKey="utilisation" name="Utilisation %" fill="var(--cyan)"   radius={[4,4,0,0]} animationDuration={600} />
             <Bar yAxisId="right" dataKey="throughput"  name="Throughput"   fill="var(--purple)" radius={[4,4,0,0]} animationDuration={600} />
           </BarChart>
@@ -167,7 +177,7 @@ export default function ProductionPlan() {
                   <table className="data-table">
                     <thead><tr><th>Facility</th><th>Shift</th><th>Assigned Qty</th><th>OEE</th></tr></thead>
                     <tbody>
-                      {selected.shift_plan.slice(0, 8).map((s, i) => (
+                      {selected.shift_plan.slice(0, productionConfig.shift_rows_display ?? 8).map((s, i) => (
                         <tr key={i}>
                           <td>{String(s.facility||'—').split('(')[0].trim()}</td>
                           <td className="mono">{s.shift || '—'}</td>
@@ -198,14 +208,14 @@ export default function ProductionPlan() {
                     <linearGradient id="tsGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%"  stopColor="var(--cyan)" stopOpacity={0.35} />
                       <stop offset="95%" stopColor="var(--cyan)" stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.8} />
+                  </linearGradient>
+                </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" strokeOpacity={0.8} />
                   <XAxis
                     dataKey="week"
                     tick={{ fontSize:9, fill:'var(--text-muted)', fontFamily:'monospace' }}
                     tickLine={false}
-                    interval={Math.max(0, Math.floor(weeklyTs.length / 12) - 1)}
+                    interval={Math.max(0, Math.floor(weeklyTs.length / (productionConfig.weekly_tick_target ?? 12)) - 1)}
                     angle={-35}
                     textAnchor="end"
                     height={50}
@@ -218,7 +228,7 @@ export default function ProductionPlan() {
                     tickFormatter={v => v.toLocaleString()}
                   />
                   <Tooltip
-                    contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }}
+                    contentStyle={CHART_TOOLTIP_STYLE}
                     formatter={v => [v.toLocaleString(), 'Avg Units/day']}
                     labelFormatter={l => `Week: ${l}`}
                   />
@@ -245,7 +255,11 @@ export default function ProductionPlan() {
               <tbody>
                 {plans.map(([plant, plan]) => {
                   const util = plan.utilisation_pct || 0
-                  const utilColor = util >= 90 ? 'var(--green)' : util >= 70 ? 'var(--amber)' : 'var(--red)'
+                  const utilColor = util >= (productionConfig.util_nominal_min ?? 90)
+                    ? 'var(--green)'
+                    : util >= (productionConfig.util_warning_min ?? 70)
+                      ? 'var(--amber)'
+                      : 'var(--red)'
                   return (
                     <tr key={plant} onClick={() => setSelPlant(plant)} style={{ cursor:'pointer' }}>
                       <td>{plant.split('(')[0].trim()}</td>

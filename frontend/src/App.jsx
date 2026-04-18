@@ -17,18 +17,19 @@ import MachineHealth        from './pages/MachineHealth'
 import FinanceDashboard     from './pages/FinanceDashboard'
 import NlpCommandPanel      from './pages/NlpCommandPanel'
 import DigitalTwin          from './pages/DigitalTwin'
+import { UiConfigProvider, useUiConfig } from './ui-config'
 
 const NAV = [
-  { path: '/',           label: 'Command Center',      Icon: Factory,       section: 'OVERVIEW' },
-  { path: '/demand',     label: 'Demand Intelligence', Icon: TrendingUp,    section: 'ANALYTICS' },
-  { path: '/inventory',  label: 'Inventory & Logistics', Icon: Package,     section: 'ANALYTICS' },
-  { path: '/production', label: 'Production Plan',     Icon: BarChart2,     section: 'ANALYTICS' },
-  { path: '/machines',   label: 'Machine Health & OEE', Icon: Wrench,       section: 'ANALYTICS' },
-  { path: '/finance',    label: 'Finance Dashboard',   Icon: DollarSign,    section: 'ANALYTICS' },
-  { path: '/carbon',     label: 'Carbon & Energy',     Icon: Zap,           section: 'ANALYTICS' },
-  { path: '/twin',       label: 'Digital Twin',        Icon: Cpu,           section: 'SIMULATION' },
-  { path: '/nlp',        label: 'NLP Command Panel',   Icon: MessageSquare, section: 'CONTROL' },
-  { path: '/hitl',       label: 'HITL Inbox',          Icon: GitBranch,     section: 'CONTROL' },
+  { path: '/',           label: 'Command Center',        pageTitle: 'Command Center',            Icon: Factory,       section: 'OVERVIEW' },
+  { path: '/demand',     label: 'Demand Intelligence',   pageTitle: 'Demand Intelligence',       Icon: TrendingUp,    section: 'ANALYTICS' },
+  { path: '/inventory',  label: 'Inventory & Logistics', pageTitle: 'Inventory & Logistics',     Icon: Package,       section: 'ANALYTICS' },
+  { path: '/production', label: 'Production Plan',       pageTitle: 'Production Master Plan',    Icon: BarChart2,     section: 'ANALYTICS' },
+  { path: '/machines',   label: 'Machine Health & OEE',  pageTitle: 'Machine Health & OEE',      Icon: Wrench,        section: 'ANALYTICS' },
+  { path: '/finance',    label: 'Finance Dashboard',     pageTitle: 'Finance Dashboard',         Icon: DollarSign,    section: 'ANALYTICS' },
+  { path: '/carbon',     label: 'Carbon & Energy',       pageTitle: 'Carbon & Energy',           Icon: Zap,           section: 'ANALYTICS' },
+  { path: '/twin',       label: 'Digital Twin',          pageTitle: 'Digital Twin Simulation',   Icon: Cpu,           section: 'SIMULATION' },
+  { path: '/nlp',        label: 'NLP Command Panel',     pageTitle: 'NLP Command Panel',         Icon: MessageSquare, section: 'CONTROL' },
+  { path: '/hitl',       label: 'HITL Inbox',            pageTitle: 'HITL Inbox',                Icon: GitBranch,     section: 'CONTROL' },
 ]
 
 function StatusDot({ status }) {
@@ -38,6 +39,8 @@ function StatusDot({ status }) {
 
 function Sidebar({ status, hitlCount, onRun, running }) {
   const location = useLocation()
+  const { uiConfig } = useUiConfig()
+  const brandSubtitle = uiConfig.app?.brand_subtitle || 'Tactical Command v2.0'
 
   // Group nav items by section
   const sections = {}
@@ -50,7 +53,7 @@ function Sidebar({ status, hitlCount, onRun, running }) {
     <div className="sidebar">
       <div className="sidebar-brand">
         <div className="sidebar-brand-title">OPS//CORE</div>
-        <div className="sidebar-brand-sub">Tactical Command v2.0</div>
+        <div className="sidebar-brand-sub">{brandSubtitle}</div>
       </div>
 
       <nav className="sidebar-nav">
@@ -119,26 +122,23 @@ function Topbar({ title, status, health, lastRun }) {
   )
 }
 
-const PAGE_TITLES = {
-  '/':           'Command Center',
-  '/demand':     'Demand Intelligence',
-  '/inventory':  'Inventory & Logistics',
-  '/production': 'Production Master Plan',
-  '/machines':   'Machine Health & OEE',
-  '/finance':    'Finance Dashboard',
-  '/carbon':     'Carbon & Energy',
-  '/twin':       'Digital Twin Simulation',
-  '/nlp':        'NLP Command Panel',
-  '/hitl':       'HITL Inbox',
-}
+const PAGE_TITLES = Object.fromEntries(NAV.map(({ path, label, pageTitle }) => [path, pageTitle || label]))
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 function AppInner() {
   const location = useLocation()
+  const { uiConfig } = useUiConfig()
   const [systemStatus, setSystemStatus] = useState({ final_status: 'UNKNOWN', system_health: 0, last_run_at: null })
   const [hitlCount,    setHitlCount]    = useState(0)
   const [running,      setRunning]      = useState(false)
+
+  const appConfig = uiConfig.app || {}
+  const statusPollMs = appConfig.status_poll_ms || 15000
+  const runStartupDelayMs = appConfig.run_poll_startup_delay_ms || 2000
+  const runPollIntervalMs = appConfig.run_poll_interval_ms || 1500
+  const runPollMaxAttempts = appConfig.run_poll_max_attempts || 60
+  const runPollMinAttemptsBeforeExit = appConfig.run_poll_min_attempts_before_exit || 2
 
   const fetchStatus = useCallback(async () => {
     let statusData = null
@@ -157,9 +157,9 @@ function AppInner() {
 
   useEffect(() => {
     fetchStatus()
-    const id = setInterval(fetchStatus, 15000)
+    const id = setInterval(fetchStatus, statusPollMs)
     return () => clearInterval(id)
-  }, [fetchStatus])
+  }, [fetchStatus, statusPollMs])
 
   const handleRun = async () => {
     if (running) return
@@ -173,14 +173,14 @@ function AppInner() {
     }
 
     // Wait 2 s for the background thread to set is_running = True before polling
-    await wait(2000)
+    await wait(runStartupDelayMs)
 
     try {
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < runPollMaxAttempts; i++) {
         const status = await fetchStatus()
         // Only exit the loop once the backend explicitly reports it finished
-        if (i >= 2 && status && !status.is_running) break
-        await wait(1500)
+        if (i >= runPollMinAttemptsBeforeExit && status && !status.is_running) break
+        await wait(runPollIntervalMs)
       }
     } catch (e) {
       console.error('Status polling failed:', e)
@@ -228,8 +228,10 @@ function AppInner() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AppInner />
-    </BrowserRouter>
+    <UiConfigProvider>
+      <BrowserRouter>
+        <AppInner />
+      </BrowserRouter>
+    </UiConfigProvider>
   )
 }

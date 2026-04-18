@@ -5,6 +5,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine
 } from 'recharts'
 import * as api from '../api/client'
+import { useUiConfig } from '../ui-config'
 
 const RISK_COLOR = {
   critical: 'var(--red)',
@@ -15,10 +16,24 @@ const RISK_COLOR = {
   high:     'var(--red)',
 }
 
-function FacilityRiskCard({ name, risk }) {
+const CHART_TOOLTIP_STYLE = {
+  background: 'var(--bg-card)',
+  border: '1px solid rgba(240, 238, 232, 0.1)',
+  borderRadius: 12,
+  fontSize: 12,
+  boxShadow: '0 10px 24px rgba(0,0,0,0.45)',
+}
+
+function FacilityRiskCard({ name, risk, thresholds }) {
   const status = risk.status || 'healthy'
   const color  = RISK_COLOR[status] || 'var(--text-muted)'
   const score  = risk.risk_score || 0
+  const riskCriticalMin = thresholds?.risk_progress_critical_min ?? 80
+  const riskWarningMin = thresholds?.risk_progress_warning_min ?? 50
+  const oeeTargetPct = thresholds?.oee_target_pct ?? 90
+  const oeeWarningPct = thresholds?.oee_warning_pct ?? 80
+  const ttfCriticalHrs = thresholds?.ttf_critical_hrs ?? 24
+  const ttfWarningHrs = thresholds?.ttf_warning_hrs ?? 100
 
   return (
     <div className="card" style={{ borderTopColor: color, borderTop: `3px solid ${color}` }}>
@@ -41,20 +56,20 @@ function FacilityRiskCard({ name, risk }) {
         <div className="progress-bar">
           <div className="progress-fill" style={{
             width:`${score}%`,
-            '--fill-color': score >= 80 ? 'var(--red)' : score >= 50 ? 'var(--amber)' : 'var(--green)'
+            '--fill-color': score >= riskCriticalMin ? 'var(--red)' : score >= riskWarningMin ? 'var(--amber)' : 'var(--green)'
           }} />
         </div>
       </div>
 
       <div className="stat-row">
         <span className="stat-row-label">OEE</span>
-        <span className="stat-row-value" style={{ color: (risk.oee_pct||0) >= 90 ? 'var(--green)' : (risk.oee_pct||0) >= 80 ? 'var(--amber)' : 'var(--red)' }}>
+        <span className="stat-row-value" style={{ color: (risk.oee_pct||0) >= oeeTargetPct ? 'var(--green)' : (risk.oee_pct||0) >= oeeWarningPct ? 'var(--amber)' : 'var(--red)' }}>
           {(risk.oee_pct || 0).toFixed(1)}%
         </span>
       </div>
       <div className="stat-row">
         <span className="stat-row-label">TTF</span>
-        <span className="stat-row-value" style={{ color: (risk.ttf_hrs||0) < 24 ? 'var(--red)' : (risk.ttf_hrs||0) < 100 ? 'var(--amber)' : 'var(--green)' }}>
+        <span className="stat-row-value" style={{ color: (risk.ttf_hrs||0) < ttfCriticalHrs ? 'var(--red)' : (risk.ttf_hrs||0) < ttfWarningHrs ? 'var(--amber)' : 'var(--green)' }}>
           {risk.ttf_hrs != null ? `${risk.ttf_hrs.toFixed(0)} hrs` : '—'}
         </span>
       </div>
@@ -75,10 +90,13 @@ function FacilityRiskCard({ name, risk }) {
 }
 
 export default function MachineHealth() {
+  const { uiConfig } = useUiConfig()
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
   const [selPlant, setSelPlant] = useState(null)
+
+  const machineConfig = uiConfig.machine_health || {}
 
   const load = useCallback(async () => {
     setError(null)
@@ -159,7 +177,7 @@ export default function MachineHealth() {
         {plants.length > 0 && (() => {
           const avgOee = plants.reduce((s, p) => s + (risks[p]?.oee_pct || 0), 0) / plants.length
           return (
-            <div className="kpi-card" style={{ '--accent-color': avgOee >= 90 ? 'var(--green)' : avgOee >= 80 ? 'var(--amber)' : 'var(--red)' }}>
+            <div className="kpi-card" style={{ '--accent-color': avgOee >= (machineConfig.oee_target_pct ?? 90) ? 'var(--green)' : avgOee >= (machineConfig.oee_warning_pct ?? 80) ? 'var(--amber)' : 'var(--red)' }}>
               <div className="kpi-label">Average OEE</div>
               <div className="kpi-value">{avgOee.toFixed(1)}%</div>
               <div className="kpi-delta">fleet-wide average</div>
@@ -180,16 +198,16 @@ export default function MachineHealth() {
       {/* OEE Bar Chart */}
       {oeeBar.length > 0 && (
         <div className="chart-container">
-          <div className="chart-title">📊 OEE & Risk Score by Facility</div>
+        <div className="chart-title">📊 OEE & Risk Score by Facility</div>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={oeeBar} margin={{ top:10, right:20, left:10, bottom:30 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.8} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" strokeOpacity={0.8} />
               <XAxis dataKey="plant" tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} angle={-20} textAnchor="end" height={40} />
               <YAxis tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} axisLine={false} width={48} unit="%" domain={[0,105]} />
-              <Tooltip contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }} />
+              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
               <Legend wrapperStyle={{ fontSize:11, paddingTop:8 }} />
-              <ReferenceLine y={90} stroke="var(--green)" strokeDasharray="4 2" label={{ value:'Target 90%', fill:'var(--green)', fontSize:10, position:'insideTopRight' }} />
-              <ReferenceLine y={80} stroke="var(--amber)" strokeDasharray="4 2" label={{ value:'Warning 80%', fill:'var(--amber)', fontSize:10, position:'insideTopRight' }} />
+              <ReferenceLine y={machineConfig.oee_target_pct ?? 90} stroke="var(--green)" strokeDasharray="4 2" label={{ value:`Target ${machineConfig.oee_target_pct ?? 90}%`, fill:'var(--green)', fontSize:10, position:'insideTopRight' }} />
+              <ReferenceLine y={machineConfig.oee_warning_pct ?? 80} stroke="var(--amber)" strokeDasharray="4 2" label={{ value:`Warning ${machineConfig.oee_warning_pct ?? 80}%`, fill:'var(--amber)', fontSize:10, position:'insideTopRight' }} />
               <Bar dataKey="oee"  name="OEE %"       fill="var(--cyan)"   radius={[4,4,0,0]} animationDuration={600} />
               <Bar dataKey="risk" name="Risk Score"   fill="var(--red)"    radius={[4,4,0,0]} opacity={0.7} animationDuration={600} />
             </BarChart>
@@ -209,7 +227,7 @@ export default function MachineHealth() {
           {selOeeTs.length > 0 ? (
             <ResponsiveContainer width="100%" height={240}>
               <LineChart data={selOeeTs} margin={{ top:10, right:20, left:10, bottom:30 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.5} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" strokeOpacity={0.5} />
                 <XAxis
                   dataKey="date"
                   tick={{ fontSize:10, fill:'var(--text-muted)', fontFamily:'monospace' }}
@@ -225,18 +243,28 @@ export default function MachineHealth() {
                   axisLine={false}
                   width={48}
                   unit="%"
-                  domain={[60, 105]}
-                  ticks={[60, 70, 75, 80, 85, 90, 95, 100, 105]}
+                  domain={[machineConfig.trend_y_axis_min ?? 60, machineConfig.trend_y_axis_max ?? 105]}
+                  ticks={[
+                    machineConfig.trend_y_axis_min ?? 60,
+                    70,
+                    75,
+                    machineConfig.oee_warning_pct ?? 80,
+                    85,
+                    machineConfig.oee_target_pct ?? 90,
+                    95,
+                    100,
+                    machineConfig.trend_y_axis_max ?? 105,
+                  ]}
                 />
                 <Tooltip
-                  contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }}
+                  contentStyle={CHART_TOOLTIP_STYLE}
                   formatter={v=>[`${parseFloat(v).toFixed(1)}%`,'OEE (weekly avg)']}
                   labelStyle={{ color:'var(--text-muted)', marginBottom:4 }}
                 />
-                <ReferenceLine y={90} stroke="var(--green)" strokeDasharray="5 3" strokeOpacity={0.8}
-                  label={{ value:'Target 90%', fill:'var(--green)', fontSize:9, position:'insideTopRight' }} />
-                <ReferenceLine y={80} stroke="var(--amber)" strokeDasharray="5 3" strokeOpacity={0.8}
-                  label={{ value:'Warning 80%', fill:'var(--amber)', fontSize:9, position:'insideTopRight' }} />
+                <ReferenceLine y={machineConfig.oee_target_pct ?? 90} stroke="var(--green)" strokeDasharray="5 3" strokeOpacity={0.8}
+                  label={{ value:`Target ${machineConfig.oee_target_pct ?? 90}%`, fill:'var(--green)', fontSize:9, position:'insideTopRight' }} />
+                <ReferenceLine y={machineConfig.oee_warning_pct ?? 80} stroke="var(--amber)" strokeDasharray="5 3" strokeOpacity={0.8}
+                  label={{ value:`Warning ${machineConfig.oee_warning_pct ?? 80}%`, fill:'var(--amber)', fontSize:9, position:'insideTopRight' }} />
                 <Line
                   type="monotone"
                   dataKey="oee"
@@ -255,7 +283,7 @@ export default function MachineHealth() {
         <div className="card" style={{ marginBottom:0 }}>
           <div className="card-header"><div className="card-title">💡 Mechanic Recommendations</div></div>
           {recs.length > 0 ? (
-            recs.slice(0,6).map((r, i) => (
+            recs.slice(0, machineConfig.recommendations_display ?? 6).map((r, i) => (
               <div key={i} className="stat-row">
                 <span className="stat-row-label" style={{ fontSize:12 }}>
                   {typeof r === 'string' ? r : r.message || JSON.stringify(r)}
@@ -269,7 +297,7 @@ export default function MachineHealth() {
       {/* Facility Risk Cards */}
       <div className="section-title" style={{ marginTop:20 }}>🔧 Facility Telemetry Detail</div>
       <div className="three-col">
-        {plants.map(p => <FacilityRiskCard key={p} name={p} risk={risks[p]} />)}
+        {plants.map(p => <FacilityRiskCard key={p} name={p} risk={risks[p]} thresholds={machineConfig} />)}
       </div>
     </div>
   )

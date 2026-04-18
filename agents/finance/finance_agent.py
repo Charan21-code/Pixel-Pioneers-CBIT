@@ -453,7 +453,7 @@ Respond ONLY with a JSON object:
         # Heuristic fallback
         risk_label = "HIGH" if risk_score > 65 else "MEDIUM" if risk_score > 35 else "LOW"
         return (
-            f"Monthly spend is at {pct_used:.1f}% (${spent_usd:,.0f} of $500,000). "
+            f"Monthly spend is at {pct_used:.1f}% (${spent_usd:,.0f} of ${config.FINANCE['monthly_budget']:,}). "
             f"Finance gate is {gate_decision} — proposed plan cost of ${proposed_cost:,.0f} "
             f"{'fits within' if gate_decision == 'APPROVED' else 'exceeds'} the remaining budget. "
             f"Financial risk is {risk_label} ({risk_score:.0f}/100); "
