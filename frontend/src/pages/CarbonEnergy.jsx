@@ -1,12 +1,37 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Zap, Leaf, AlertTriangle } from 'lucide-react'
 import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  ComposedChart, Area, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import * as api from '../api/client'
 
 const GRID_COLORS = { Peak: '#FF1744', 'Off-Peak': '#00E676', peak: '#FF1744', off_peak: '#00E676' }
+
+const parseChartDate = (value) => {
+  if (!value) return null
+
+  const parts = String(value).split('-').map(Number)
+  if (parts.length === 3 && parts.every(Number.isFinite)) {
+    return new Date(parts[0], parts[1] - 1, parts[2])
+  }
+
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+const formatChartDate = (value, options) => {
+  const parsed = parseChartDate(value)
+  return parsed
+    ? parsed.toLocaleDateString('en-US', options)
+    : String(value)
+}
+
+const formatCompactValue = (value) =>
+  new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(Number(value) || 0)
+
+const formatFullValue = (value) =>
+  Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })
 
 export default function CarbonEnergy() {
   const [data,    setData]    = useState(null)
@@ -32,6 +57,33 @@ export default function CarbonEnergy() {
   const facilities  = data?.facility_penalties || []
   const energySeries = data?.energy_time_series || []
   const suggestions = data?.shift_suggestions || []
+  const trendWindow = 14
+  const energyChartSeries = energySeries.map((point, index, series) => {
+    const kwh = Number(point?.kwh || 0)
+    const windowStart = Math.max(0, index - trendWindow + 1)
+    const trendSlice = series.slice(windowStart, index + 1)
+    const trend = trendSlice.reduce((sum, item) => sum + Number(item?.kwh || 0), 0) / trendSlice.length
+
+    return {
+      ...point,
+      kwh,
+      trend: Number(trend.toFixed(1)),
+    }
+  })
+  const energyPointCount = energyChartSeries.length
+  const energyTickValues = energyPointCount > 1
+    ? Array.from({ length: Math.min(7, energyPointCount) }, (_, idx) => {
+        const lastIndex = energyPointCount - 1
+        const pointIndex = Math.round((idx * lastIndex) / Math.max(1, Math.min(7, energyPointCount) - 1))
+        return energyChartSeries[pointIndex]?.date
+      }).filter((value, idx, arr) => value && arr.indexOf(value) === idx)
+    : energyChartSeries.map(point => point.date)
+  const totalEnergyForAvg = energyChartSeries.reduce((sum, point) => sum + point.kwh, 0)
+  const averageEnergy = energyPointCount ? totalEnergyForAvg / energyPointCount : 0
+  const latestEnergyPoint = energyPointCount ? energyChartSeries[energyPointCount - 1] : null
+  const peakEnergyPoint = energyChartSeries.reduce((peak, point) => (
+    !peak || point.kwh > peak.kwh ? point : peak
+  ), null)
 
   return (
     <div>
@@ -90,21 +142,101 @@ export default function CarbonEnergy() {
       <div className="two-col">
         {/* Energy Time Series */}
         <div className="chart-container">
-          <div className="chart-title"><Zap size={14} /> Daily Energy Consumption (kWh)</div>
-            <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={energySeries} margin={{ top:10, right:20, left:10, bottom:30 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:16, flexWrap:'wrap', marginBottom:14 }}>
+            <div>
+              <div className="chart-title" style={{ marginBottom:8 }}><Zap size={14} /> Daily Energy Consumption (kWh)</div>
+              <div style={{ fontSize:12, color:'var(--text-secondary)' }}>
+                Daily readings stay visible in the background while the highlighted {trendWindow}-day trend makes the overall pattern easier to read.
+              </div>
+            </div>
+            {energyPointCount > 0 && (
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                <div style={{ padding:'8px 10px', borderRadius:12, background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)' }}>
+                  <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--text-muted)', marginBottom:4 }}>Average</div>
+                  <div style={{ fontSize:14, fontWeight:600, color:'var(--text-primary)' }}>{formatCompactValue(averageEnergy)} kWh</div>
+                </div>
+                <div style={{ padding:'8px 10px', borderRadius:12, background:'rgba(255,179,0,0.08)', border:'1px solid rgba(255,179,0,0.16)' }}>
+                  <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--text-muted)', marginBottom:4 }}>Peak Day</div>
+                  <div style={{ fontSize:14, fontWeight:600, color:'var(--amber)' }}>{formatCompactValue(peakEnergyPoint?.kwh || 0)} kWh</div>
+                </div>
+                <div style={{ padding:'8px 10px', borderRadius:12, background:'rgba(56,189,248,0.08)', border:'1px solid rgba(56,189,248,0.16)' }}>
+                  <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--text-muted)', marginBottom:4 }}>Latest</div>
+                  <div style={{ fontSize:14, fontWeight:600, color:'var(--cyan)' }}>{formatCompactValue(latestEnergyPoint?.kwh || 0)} kWh</div>
+                </div>
+              </div>
+            )}
+          </div>
+            <ResponsiveContainer width="100%" height={300}>
+              <ComposedChart data={energyChartSeries} margin={{ top:10, right:16, left:4, bottom:18 }}>
                 <defs>
                   <linearGradient id="nrgGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#FFB300" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#FFB300" stopOpacity={0}    />
+                    <stop offset="0%" stopColor="#FBBF24" stopOpacity={0.18} />
+                    <stop offset="100%" stopColor="#FBBF24" stopOpacity={0.02} />
                   </linearGradient>
+                  <filter id="nrgGlow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feMerge>
+                      <feMergeNode in="blur" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.8} />
-                <XAxis dataKey="date" tick={{ fontSize:10, fill:'var(--text-muted)', fontFamily:'monospace' }} tickLine={false} interval="preserveStartEnd" angle={-30} textAnchor="end" height={45} />
-                <YAxis tick={{ fontSize:10, fill:'var(--text-muted)' }} tickLine={false} axisLine={false} width={72} tickFormatter={v => v.toLocaleString()} />
-                <Tooltip contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }} formatter={v=>[v.toLocaleString(),'kWh']} />
-                <Area type="monotone" dataKey="kwh" stroke="var(--amber)" strokeWidth={2} fill="url(#nrgGrad)" dot={false} animationDuration={600} />
-              </AreaChart>
+                <CartesianGrid strokeDasharray="2 4" stroke="#253347" strokeOpacity={0.45} vertical={false} />
+                <XAxis
+                  dataKey="date"
+                  ticks={energyTickValues}
+                  tick={{ fontSize:11, fill:'var(--text-muted)' }}
+                  tickLine={false}
+                  axisLine={false}
+                  minTickGap={24}
+                  tickMargin={10}
+                  tickFormatter={value => formatChartDate(value, { month:'short', year:'2-digit' })}
+                />
+                <YAxis
+                  tick={{ fontSize:11, fill:'var(--text-muted)' }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={54}
+                  tickCount={5}
+                  tickFormatter={value => formatCompactValue(value)}
+                  domain={[
+                    (dataMin) => Math.max(0, Math.floor(dataMin * 0.88)),
+                    (dataMax) => Math.ceil(dataMax * 1.08),
+                  ]}
+                />
+                <Tooltip
+                  cursor={{ stroke:'rgba(255,255,255,0.2)', strokeDasharray:'4 4' }}
+                  contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:12, fontSize:12, boxShadow:'0 10px 24px rgba(0,0,0,0.45)' }}
+                  labelFormatter={value => formatChartDate(value, { day:'numeric', month:'short', year:'numeric' })}
+                  formatter={(value, name) => [
+                    `${formatFullValue(value)} kWh`,
+                    name === 'trend' ? `${trendWindow}-day trend` : 'Daily usage',
+                  ]}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="kwh"
+                  name="kwh"
+                  stroke="#FCD34D"
+                  strokeOpacity={0.2}
+                  strokeWidth={1.5}
+                  fill="url(#nrgGrad)"
+                  dot={false}
+                  activeDot={false}
+                  animationDuration={600}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="trend"
+                  name="trend"
+                  stroke="#F59E0B"
+                  strokeWidth={3}
+                  dot={false}
+                  activeDot={{ r:5, strokeWidth:0, fill:'#FCD34D' }}
+                  filter="url(#nrgGlow)"
+                  animationDuration={600}
+                />
+              </ComposedChart>
             </ResponsiveContainer>
         </div>
 

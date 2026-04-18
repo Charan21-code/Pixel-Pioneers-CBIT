@@ -1,247 +1,313 @@
-import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, AlertTriangle, CheckCircle, Clock, Activity, Zap, Package, Users } from 'lucide-react'
-import {
-  AreaChart, Area, ResponsiveContainer, Tooltip, XAxis, YAxis
-} from 'recharts'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { AlertTriangle, Activity, ShieldAlert, CheckCircle2, Play } from 'lucide-react'
 import * as api from '../api/client'
 
-const STATUS_CLASS = { ALL_OK: 'ok', NEEDS_HITL: 'hitl', BLOCKED: 'blocked', UNKNOWN: 'unknown' }
-const STATUS_LABEL = {
-  ALL_OK:     '🟢 ALL SYSTEMS GO — All agents operating within approved parameters',
-  NEEDS_HITL: '🟡 ATTENTION NEEDED — Issues require human review',
-  BLOCKED:    '🔴 PRODUCTION BLOCKED — Critical conflicts. HITL review required',
-  UNKNOWN:    '⏳ Agents initializing — first run in progress, data will appear shortly...',
+const STATUS_VIEW = {
+  ALL_OK: { label: 'NOMINAL', tone: 'nominal', icon: CheckCircle2, text: 'Global ecosystem is operating inside target tolerances.' },
+  NEEDS_HITL: { label: 'WARNING', tone: 'warning', icon: AlertTriangle, text: 'Human review required for priority decisions and overrides.' },
+  BLOCKED: { label: 'CRITICAL', tone: 'critical', icon: ShieldAlert, text: 'System is blocked by unresolved critical dependencies.' },
+  UNKNOWN: { label: 'INITIALIZING', tone: 'warning', icon: Activity, text: 'Awaiting first completed cycle from orchestration engine.' },
 }
 
-const AGENT_ACCENT = {
-  forecast:  'var(--cyan)',
-  mechanic:  'var(--amber)',
-  buyer:     'var(--purple)',
-  environ:   'var(--green)',
-  finance:   'var(--red)',
-  scheduler: 'var(--text-secondary)',
+const AGENT_NAMES = {
+  forecast: 'Forecaster',
+  mechanic: 'Mechanic',
+  buyer: 'Buyer',
+  environ: 'Environmentalist',
+  finance: 'Finance',
+  scheduler: 'Scheduler',
 }
 
-function AgentCard({ name, icon, accentKey, summary, metric, status }) {
-  const accent = AGENT_ACCENT[accentKey] || 'var(--cyan)'
+
+function Sparkline({ points }) {
+  if (!points || points.length === 0) return null
+  const max = Math.max(...points)
+  const min = Math.min(...points)
+  const spread = Math.max(max - min, 1)
+
+  const coords = points
+    .map((value, idx) => {
+      const x = (idx / (points.length - 1)) * 100
+      const y = 100 - ((value - min) / spread) * 100
+      return `${x},${y}`
+    })
+    .join(' ')
+
   return (
-    <div className="agent-card" style={{ '--accent-color': accent }}>
-      <div className="agent-name">{icon} {name}</div>
-      <div className="agent-summary">{summary || 'Not yet run.'}</div>
-      <div className="agent-metric">{metric}</div>
-    </div>
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="ops-sparkline">
+      <polyline points={coords} />
+    </svg>
   )
 }
 
-function ConflictItem({ conflict }) {
-  const isCritical = conflict.severity === 'CRITICAL'
+function OeeGauge({ value }) {
+  const pct = Math.max(0, Math.min(100, Number(value) || 0))
+  const radius = 30
+  const circumference = 2 * Math.PI * radius
+  const strokeDashoffset = circumference * (1 - pct / 100)
+  const color = pct >= 90 ? 'var(--green)' : pct >= 80 ? 'var(--amber)' : 'var(--red)'
+
   return (
-    <div className="conflict-item" style={{
-      '--border-color': isCritical ? 'var(--red)' : 'var(--amber)',
-      '--bg-glow': isCritical ? 'var(--red-glow)' : 'var(--amber-glow)',
-    }}>
-      <div className="conflict-header">
-        <span className={`badge badge-${isCritical ? 'critical' : 'warning'}`}>
-          {conflict.severity}
-        </span>
-        <span style={{ fontSize:12, color:'var(--text-secondary)' }}>
-          {conflict.type?.replace(/_/g,' ').replace(/\b\w/g, c=>c.toUpperCase())}
-        </span>
-        <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:'auto' }}>
-          {conflict.involved_agents?.join(' ↔ ')}
-        </span>
-      </div>
-      <div className="conflict-desc">{conflict.description}</div>
-      <div className="conflict-action">→ {conflict.action}</div>
-    </div>
+    <svg viewBox="0 0 84 84" className="ops-oee-gauge" role="img" aria-label={`OEE ${pct.toFixed(1)} percent`}>
+      <circle cx="42" cy="42" r={radius} className="ops-oee-bg" />
+      <circle
+        cx="42"
+        cy="42"
+        r={radius}
+        className="ops-oee-fill"
+        style={{ strokeDasharray: circumference, strokeDashoffset, stroke: color }}
+      />
+      <text x="42" y="47" textAnchor="middle">
+        {pct.toFixed(0)}%
+      </text>
+    </svg>
   )
 }
 
-function PlantCard({ plant }) {
-  const topColor =
-    plant.risk_status === 'critical' ? 'var(--red)' :
-    plant.risk_status === 'warning'  ? 'var(--amber)' :
-    'var(--green)'
+function computeAgentScore(key, payload) {
+  if (!payload) return 0
+  if (key === 'forecast') {
+    if (payload.risk_level === 'high') return 52
+    if (payload.risk_level === 'medium') return 74
+    return 91
+  }
+  if (key === 'mechanic') {
+    const critical = Number(payload.critical_count || 0)
+    const warning = Number(payload.warning_count || 0)
+    return Math.max(100 - critical * 25 - warning * 8, 18)
+  }
+  if (key === 'buyer') {
+    const reorders = Number(payload.reorders_triggered || 0)
+    return Math.max(94 - reorders * 4, 32)
+  }
+  if (key === 'environ') {
+    return payload.compliance_flag ? 88 : 54
+  }
+  if (key === 'finance') {
+    return Number(payload.health_score || 0)
+  }
+  if (key === 'scheduler') {
+    return Number(payload.avg_utilisation || 0)
+  }
+  return 0
+}
 
-  const invEmoji =
-    plant.inv_status === 'healthy' ? '✅' :
-    plant.inv_status === 'low'     ? '⚠️' : '🔴'
+function agentBadge(score) {
+  if (score >= 85) return { text: 'Nominal', cls: 'ops-badge-ok' }
+  if (score >= 65) return { text: 'Watch', cls: 'ops-badge-warn' }
+  return { text: 'Critical', cls: 'ops-badge-critical' }
+}
 
-  return (
-    <div className="plant-card" style={{ '--top-color': topColor }}>
-      <div className="plant-name">{plant.short_name}</div>
-      <div className="plant-full-name">{plant.name}</div>
-      <div className="plant-stats">
-        <div className="plant-stat">
-          <span>OEE</span>
-          <span className="plant-stat-val" style={{ color: plant.oee_pct >= 90 ? 'var(--green)' : plant.oee_pct >= 80 ? 'var(--amber)' : 'var(--red)' }}>
-            {plant.oee_pct?.toFixed(1)}%
-          </span>
-        </div>
-        <div className="plant-stat">
-          <span>Risk</span>
-          <span className="plant-stat-val" style={{ color: topColor }}>
-            {plant.risk_status?.toUpperCase()} ({plant.risk_score?.toFixed(0)})
-          </span>
-        </div>
-        <div className="plant-stat">
-          <span>Inventory</span>
-          <span className="plant-stat-val">{invEmoji} {plant.inv_days?.toFixed(1)}d</span>
-        </div>
-        <div className="plant-stat">
-          <span>Workforce</span>
-          <span className="plant-stat-val">{plant.workforce_pct?.toFixed(1)}%</span>
-        </div>
-        <div className="plant-stat">
-          <span>Throughput</span>
-          <span className="plant-stat-val">{plant.throughput?.toLocaleString()}</span>
-        </div>
-      </div>
-    </div>
-  )
+function severityForRow(row) {
+  const raw = String(row?.severity || row?.level || row?.status || '').toLowerCase()
+  if (raw.includes('critical') || raw.includes('error')) return 'critical'
+  if (raw.includes('warn') || raw.includes('hitl')) return 'warning'
+  return 'nominal'
+}
+
+function toFeedRows(agentLog, conflicts) {
+  if (Array.isArray(agentLog) && agentLog.length > 0) {
+    return agentLog.map((row, idx) => ({
+      id: row.id || `${row.timestamp || row.created_at || idx}`,
+      at: row.timestamp || row.created_at || new Date().toISOString(),
+      source: row.agent || row.source || row.component || 'System',
+      event: row.message || row.event || row.action || JSON.stringify(row),
+      severity: severityForRow(row),
+    }))
+  }
+
+  if (Array.isArray(conflicts) && conflicts.length > 0) {
+    return conflicts.map((conflict, idx) => ({
+      id: `conflict-${idx}`,
+      at: new Date().toISOString(),
+      source: conflict.type || 'Conflict Engine',
+      event: conflict.description || conflict.action || 'Conflict raised',
+      severity: String(conflict.severity || '').toLowerCase() === 'critical' ? 'critical' : 'warning',
+    }))
+  }
+
+  return []
 }
 
 export default function CommandCenter({ onRunAgents, running }) {
-  const [data,    setData]    = useState(null)
-  const [plants,  setPlants]  = useState([])
   const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState(null)
+  const [error, setError] = useState(null)
+  const [snapshot, setSnapshot] = useState(null)
+  const [plants, setPlants] = useState([])
+  const [feedRows, setFeedRows] = useState([])
 
   const load = useCallback(async () => {
     setError(null)
     try {
-      const [cc, pl] = await Promise.all([api.getCommandCenter(), api.getPlants()])
-      setData(cc)
-      setPlants(pl.plants || [])
+      const [cc, pl, logs] = await Promise.all([
+        api.getCommandCenter(),
+        api.getPlants(),
+        api.getAgentLog({ limit: 18 }).catch(() => []),
+      ])
+
+      setSnapshot(cc)
+      setPlants(pl?.plants || [])
+      setFeedRows(toFeedRows(logs?.items || logs || [], cc?.conflicts || []))
     } catch (e) {
-      setError(e.message)
+      setError(e.message || 'Failed to load command center')
     } finally {
       setLoading(false)
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+  }, [load])
+
   useEffect(() => {
     const id = setInterval(load, 30000)
     return () => clearInterval(id)
   }, [load])
 
+  const metrics = useMemo(() => {
+    const kpis = snapshot?.kpis || {}
+    const hitl = snapshot?.hitl_counts || {}
+    return [
+      { key: 'otd', label: 'On-Time Delivery', value: `${Number(kpis.on_time_pct || 0).toFixed(1)}%`, numeric: Number(kpis.on_time_pct || 0), tone: 'nominal' },
+      { key: 'alerts', label: 'Active Alerts', value: Number(kpis.active_alerts || 0).toLocaleString(), numeric: Number(kpis.active_alerts || 0), tone: Number(kpis.active_alerts || 0) > 0 ? 'critical' : 'nominal' },
+      { key: 'health', label: 'System Health', value: `${Number(snapshot?.system_health || 0).toFixed(0)}/100`, numeric: Number(snapshot?.system_health || 0), tone: Number(snapshot?.system_health || 0) >= 70 ? 'nominal' : 'warning' },
+      { key: 'inventory', label: 'Min Inventory Days', value: `${Number(kpis.min_inventory_days || 0).toFixed(1)}d`, numeric: Number(kpis.min_inventory_days || 0), tone: Number(kpis.min_inventory_days || 0) < 3 ? 'critical' : 'warning' },
+      { key: 'hitl', label: 'Pending HITL', value: Number(hitl.total || 0).toLocaleString(), numeric: Number(hitl.total || 0), tone: Number(hitl.total || 0) > 0 ? 'warning' : 'nominal' },
+    ]
+  }, [snapshot])
+
+  const agentMatrix = useMemo(() => {
+    const agents = snapshot?.agents || {}
+    return Object.entries(AGENT_NAMES).map(([key, name]) => {
+      const payload = agents[key] || {}
+      const score = computeAgentScore(key, payload)
+      return {
+        key,
+        name,
+        score,
+        badge: agentBadge(score),
+      }
+    })
+  }, [snapshot])
+
   if (loading) return <div className="loading-overlay"><div className="spinner" /><span>Loading Command Center...</span></div>
+  if (error) return <div className="error-box">{error}</div>
 
-  if (error) return (
-    <div className="error-box" style={{ marginTop:0 }}>
-      ⚠️ {error} — Backend may not be running. Start with <code>cd backend && uvicorn main:app --reload</code>
-    </div>
-  )
-
-  const status  = data?.final_status || 'UNKNOWN'
-  const health  = data?.system_health || 0
-  const kpis    = data?.kpis || {}
-  const agents  = data?.agents || {}
-  const conflicts = data?.conflicts || []
-  const hitl    = data?.hitl_counts || {}
-
-  const healthColor = health >= 70 ? 'var(--green)' : health >= 40 ? 'var(--amber)' : 'var(--red)'
+  const status = snapshot?.final_status || 'UNKNOWN'
+  const hero = STATUS_VIEW[status] || STATUS_VIEW.UNKNOWN
+  const HeroIcon = hero.icon
 
   return (
-    <div>
-      {(running || data?.is_running) && (
-        <div className="info-box" style={{ marginBottom:16 }}>
-          ⏳ Agents are currently running. Metrics will refresh automatically when the cycle completes.
+    <div className="ops-page">
+      <section className={`ops-hero-banner ops-hero-${hero.tone}`}>
+        <div className="ops-hero-left">
+          <span className="ops-hero-chip">{hero.label}</span>
+          <h2>
+            <HeroIcon size={20} />
+            OPS//CORE Global Health
+          </h2>
+          <p>{hero.text}</p>
         </div>
-      )}
-
-      {/* Status Banner */}
-      <div className={`status-banner ${STATUS_CLASS[status] || 'unknown'}`}>
-        <span style={{ flex:1 }}>{STATUS_LABEL[status] || STATUS_LABEL.UNKNOWN}</span>
-        <div className="banner-meta">
-          <span>Health: <b style={{ color: healthColor, fontFamily:'var(--font-mono)' }}>{health.toFixed(0)}/100</b></span>
-          {data?.last_run_at && <span>{new Date(data.last_run_at).toLocaleTimeString()}</span>}
-          <button className="btn btn-ghost btn-sm" onClick={load}><RefreshCw size={12} /></button>
-        </div>
-      </div>
-
-      {/* KPIs */}
-      <div className="kpi-grid">
-        <div className="kpi-card" style={{ '--accent-color':'var(--green)' }}>
-          <div className="kpi-label">On-Time Delivery</div>
-          <div className="kpi-value" style={{ color:'var(--green)' }}>{kpis.on_time_pct?.toFixed(1) ?? '—'}%</div>
-          <div className="kpi-delta">vs 90% target</div>
-          <CheckCircle size={22} className="kpi-icon" />
-        </div>
-        <div className="kpi-card" style={{ '--accent-color':'var(--red)' }}>
-          <div className="kpi-label">Active Alerts</div>
-          <div className="kpi-value" style={{ color: kpis.active_alerts > 0 ? 'var(--red)' : 'var(--green)' }}>{kpis.active_alerts ?? '—'}</div>
-          <div className="kpi-delta">{kpis.active_alerts === 0 ? 'All clear' : 'Needs attention'}</div>
-          <AlertTriangle size={22} className="kpi-icon" />
-        </div>
-        <div className="kpi-card" style={{ '--accent-color':'var(--amber)' }}>
-          <div className="kpi-label">Carbon Penalty</div>
-          <div className="kpi-value" style={{ color:'var(--amber)', fontSize:20 }}>${kpis.total_carbon_usd?.toLocaleString(undefined,{maximumFractionDigits:0}) ?? '—'}</div>
-          <div className="kpi-delta">cumulative</div>
-          <Zap size={22} className="kpi-icon" />
-        </div>
-        <div className="kpi-card" style={{ '--accent-color':'var(--cyan)' }}>
-          <div className="kpi-label">Min Inventory</div>
-          <div className="kpi-value" style={{ color:'var(--cyan)' }}>{kpis.min_inventory_days?.toFixed(1) ?? '—'}d</div>
-          <div className="kpi-delta">days remaining (worst plant)</div>
-          <Package size={22} className="kpi-icon" />
-        </div>
-        <div className="kpi-card" style={{ '--accent-color':'var(--purple)' }}>
-          <div className="kpi-label">Workforce</div>
-          <div className="kpi-value" style={{ color:'var(--purple)' }}>{kpis.workforce_pct?.toFixed(1) ?? '—'}%</div>
-          <div className="kpi-delta">coverage</div>
-          <Users size={22} className="kpi-icon" />
-        </div>
-        <div className="kpi-card" style={{ '--accent-color':'var(--red)' }}>
-          <div className="kpi-label">HITL Pending</div>
-          <div className="kpi-value" style={{ color: hitl.total > 0 ? 'var(--red)' : 'var(--green)' }}>{hitl.total ?? 0}</div>
-          <div className="kpi-delta" style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-            {hitl.ops > 0 && <span>ops:{hitl.ops}</span>}
-            {hitl.procurement > 0 && <span>proc:{hitl.procurement}</span>}
-            {hitl.finance > 0 && <span>fin:{hitl.finance}</span>}
-            {hitl.maintenance > 0 && <span>maint:{hitl.maintenance}</span>}
+        <div className="ops-hero-right">
+          <div>
+            Last Sync
+            <strong>{snapshot?.last_run_at ? new Date(snapshot.last_run_at).toLocaleTimeString() : 'N/A'}</strong>
           </div>
-          <Activity size={22} className="kpi-icon" />
+          <button className="btn btn-primary" onClick={onRunAgents} disabled={running}>
+            <Play size={14} />
+            {running ? 'Running...' : 'Run Agents'}
+          </button>
         </div>
+      </section>
+
+      <section className="ops-kpi-row">
+        {metrics.map((metric, idx) => (
+          <article key={metric.key} className={`ops-kpi-card ops-kpi-${metric.tone}`} style={{ animationDelay: `${idx * 90}ms` }}>
+            <div className="ops-kpi-head">
+              <p>{metric.label}</p>
+              <strong>{metric.value}</strong>
+            </div>
+            <Sparkline points={snapshot?.sparklines?.[metric.key] || [0, 0]} />
+          </article>
+        ))}
+      </section>
+
+      <section className="ops-panel">
+        <div className="ops-section-head">
+          <h3>Plant Overview Grid</h3>
+          <span>{plants.length} facilities</span>
+        </div>
+        <div className="ops-plant-grid">
+          {plants.map((plant) => (
+            <article key={plant.name} className="ops-plant-card">
+              <div>
+                <h4>{plant.short_name || plant.name}</h4>
+                <p>{plant.name}</p>
+              </div>
+              <OeeGauge value={plant.oee_pct || 0} />
+              <div>
+                <div className="ops-inline-meta">
+                  <span>Workforce Coverage</span>
+                  <b>{Number(plant.workforce_pct || 0).toFixed(1)}%</b>
+                </div>
+                <div className="ops-workforce-bar">
+                  <span style={{ width: `${Math.max(0, Math.min(100, Number(plant.workforce_pct || 0)))}%` }} />
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <div className="ops-two-col">
+        <section className="ops-panel">
+          <div className="ops-section-head">
+            <h3>Agent Health Matrix</h3>
+            <span>Operational score</span>
+          </div>
+          <div className="ops-agent-matrix">
+            {agentMatrix.map((agent) => (
+              <div key={agent.key} className="ops-agent-row">
+                <span>{agent.name}</span>
+                <span className="ops-agent-score">{agent.score.toFixed(0)}</span>
+                <span className={`ops-agent-badge ${agent.badge.cls}`}>{agent.badge.text}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="ops-panel">
+          <div className="ops-section-head">
+            <h3>Live Activity Feed</h3>
+            <span>{feedRows.length} events</span>
+          </div>
+          <div className="ops-feed-wrap ops-amber-scroll">
+            <table className="ops-feed-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Source</th>
+                  <th>Event</th>
+                </tr>
+              </thead>
+              <tbody>
+                {feedRows.map((row) => (
+                  <tr key={row.id} className={`ops-feed-${row.severity}`}>
+                    <td>{new Date(row.at).toLocaleTimeString()}</td>
+                    <td>{row.source}</td>
+                    <td>{row.event}</td>
+                  </tr>
+                ))}
+                {feedRows.length === 0 && (
+                  <tr>
+                    <td colSpan={3}>No activity events available.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
-
-      {/* Plant Cards */}
-      <div className="section-title">🌐 Plant Status Overview</div>
-      {plants.length > 0 ? (
-        <div className="plant-grid">
-          {plants.map(p => <PlantCard key={p.name} plant={p} />)}
-        </div>
-      ) : (
-        <div className="empty-state">
-          <div className="empty-state-icon">🏭</div>
-          <div className="empty-state-title">No plant data yet</div>
-          <div className="empty-state-desc">Click <b>Run All Agents</b> in the sidebar to load live data.</div>
-        </div>
-      )}
-
-      {/* Agent Summary */}
-      <div className="section-title">🤖 Agent Health Summary</div>
-      <div className="agent-grid">
-        <AgentCard name="Forecaster"      icon="📈" accentKey="forecast"  summary={agents.forecast?.summary}  metric={`Forecast: ${agents.forecast?.forecast_qty?.toLocaleString() || 0} units | Risk: ${agents.forecast?.risk_level || '—'}`} />
-        <AgentCard name="Mechanic"        icon="🔧" accentKey="mechanic"  summary={agents.mechanic?.summary}  metric={`${agents.mechanic?.critical_count || 0} critical, ${agents.mechanic?.warning_count || 0} warning facility(ies)`} />
-        <AgentCard name="Buyer"           icon="📦" accentKey="buyer"     summary={`${agents.buyer?.reorders_triggered || 0} reorder(s) triggered`} metric={`$${(agents.buyer?.total_spend_usd || 0).toLocaleString(undefined,{maximumFractionDigits:0})} requested`} />
-        <AgentCard name="Environmentalist" icon="🌱" accentKey="environ"  summary={agents.environ?.summary}  metric={`Peak penalty: ${agents.environ?.peak_penalty_pct?.toFixed(1) || 0}% | ${agents.environ?.compliance_flag ? '✅ Compliant' : '⚠️ Non-Compliant'}`} />
-        <AgentCard name="Finance"         icon="💰" accentKey="finance"   summary={`Health: ${agents.finance?.health_score?.toFixed(1) || '—'}/100 | Gate: ${agents.finance?.gate_decision || '—'}`} metric={`$${(agents.finance?.spent_usd || 0).toLocaleString(undefined,{maximumFractionDigits:0})} spent`} />
-        <AgentCard name="Scheduler"       icon="🗓️" accentKey="scheduler" summary={`${agents.scheduler?.plant_count || 0} plant plans generated`} metric={`Avg Utilisation: ${agents.scheduler?.avg_utilisation?.toFixed?.(1) ?? agents.scheduler?.avg_utilisation ?? 0}% | Throughput: ${(agents.scheduler?.total_throughput || 0).toLocaleString()}`} />
-      </div>
-
-      {/* Conflicts */}
-      <div className="section-title">⚡ Active Conflicts ({conflicts.length})</div>
-      {conflicts.length > 0 ? (
-        <div className="conflict-list">
-          {conflicts.map((c, i) => <ConflictItem key={i} conflict={c} />)}
-        </div>
-      ) : (
-        <div className="info-box">
-          ✅ No cross-agent conflicts detected. All agents are operating within approved parameters.
-        </div>
-      )}
     </div>
   )
 }

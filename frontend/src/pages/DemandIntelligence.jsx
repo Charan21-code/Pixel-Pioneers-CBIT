@@ -6,12 +6,12 @@ import {
 } from 'recharts'
 import * as api from '../api/client'
 
-const FACILITIES_COLORS = ['#00E5FF','#FFB300','#00E676','#7C3AED','#FF1744','#FF6D00']
+const FACILITIES_COLORS = ['#00E5FF', '#FFB300', '#00E676', '#7C3AED', '#FF1744', '#FF6D00']
 
 export default function DemandIntelligence() {
-  const [data,    setData]    = useState(null)
+  const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState(null)
+  const [error, setError] = useState(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -23,15 +23,15 @@ export default function DemandIntelligence() {
   useEffect(() => { load() }, [load])
 
   if (loading) return <div className="loading-overlay"><div className="spinner" /><span>Loading Demand Intelligence...</span></div>
-  if (error)   return <div className="error-box">{error}</div>
+  if (error) return <div className="error-box">{error}</div>
 
-  const ts       = data?.time_series   || []
-  const forecast = data?.forecast_qty  || 0
-  const slope    = data?.trend_slope   || 0
-  const r2       = data?.r_squared     || 0
-  const anomaly  = data?.anomaly_count || 0
-  const risk     = data?.risk_level    || 'low'
-  const sched    = data?.schedule_status || {}
+  const ts = data?.time_series || []
+  const forecast = data?.forecast_qty || 0
+  const slope = data?.trend_slope || 0
+  const r2 = data?.r_squared || 0
+  const anomaly = data?.anomaly_count || 0
+  const risk = data?.risk_level || 'low'
+  const sched = data?.schedule_status || {}
 
   const riskColor = risk === 'high' ? 'var(--red)' : risk === 'medium' ? 'var(--amber)' : 'var(--green)'
 
@@ -39,15 +39,15 @@ export default function DemandIntelligence() {
     <div>
       {/* KPIs */}
       <div className="kpi-grid">
-        <div className="kpi-card" style={{ '--accent-color':'var(--cyan)' }}>
+        <div className="kpi-card" style={{ '--accent-color': 'var(--cyan)' }}>
           <div className="kpi-label">7-Day Forecast</div>
           <div className="kpi-value">{forecast.toLocaleString()}</div>
           <div className="kpi-delta">units demand projected</div>
         </div>
         <div className="kpi-card" style={{ '--accent-color': slope >= 0 ? 'var(--green)' : 'var(--red)' }}>
           <div className="kpi-label">Trend Slope</div>
-          <div className="kpi-value" style={{ color: slope >= 0 ? 'var(--green)' : 'var(--red)', fontSize:22 }}>
-            {slope >= 0 ? <TrendingUp size={20} style={{ display:'inline' }} /> : <TrendingDown size={20} style={{ display:'inline' }} />}
+          <div className="kpi-value" style={{ color: slope >= 0 ? 'var(--green)' : 'var(--red)', fontSize: 22 }}>
+            {slope >= 0 ? <TrendingUp size={20} style={{ display: 'inline' }} /> : <TrendingDown size={20} style={{ display: 'inline' }} />}
             {' '}{slope >= 0 ? '+' : ''}{slope.toFixed(2)} u/day
           </div>
           <div className="kpi-delta">R² = {r2.toFixed(3)}</div>
@@ -59,26 +59,26 @@ export default function DemandIntelligence() {
         </div>
         <div className="kpi-card" style={{ '--accent-color': riskColor }}>
           <div className="kpi-label">Risk Level</div>
-          <div className="kpi-value" style={{ color: riskColor, textTransform:'uppercase', fontSize:20 }}>{risk}</div>
+          <div className="kpi-value" style={{ color: riskColor, textTransform: 'uppercase', fontSize: 20 }}>{risk}</div>
           <div className="kpi-delta">{data?.recommended_action?.slice(0, 60) || '—'}</div>
         </div>
-        <div className="kpi-card" style={{ '--accent-color':'var(--green)' }}>
+        <div className="kpi-card" style={{ '--accent-color': 'var(--green)' }}>
           <div className="kpi-label">On-Time Events</div>
-          <div className="kpi-value" style={{ color:'var(--green)' }}>
+          <div className="kpi-value" style={{ color: 'var(--green)' }}>
             {sched.total > 0 ? ((sched.on_time / sched.total) * 100).toFixed(1) : '—'}%
           </div>
           <div className="kpi-delta">{sched.on_time?.toLocaleString()} of {sched.total?.toLocaleString()}</div>
         </div>
-        <div className="kpi-card" style={{ '--accent-color':'var(--red)' }}>
+        <div className="kpi-card" style={{ '--accent-color': 'var(--red)' }}>
           <div className="kpi-label">Delayed Events</div>
-          <div className="kpi-value" style={{ color:'var(--red)' }}>{sched.delayed?.toLocaleString() || 0}</div>
+          <div className="kpi-value" style={{ color: 'var(--red)' }}>{sched.delayed?.toLocaleString() || 0}</div>
           <div className="kpi-delta">require intervention</div>
         </div>
       </div>
 
       {/* Agent Summary */}
       {data?.summary && (
-        <div className="info-box" style={{ marginBottom:20 }}>
+        <div className="info-box" style={{ marginBottom: 20 }}>
           📈 <b>Forecaster Agent:</b> {data.summary}
         </div>
       )}
@@ -87,18 +87,18 @@ export default function DemandIntelligence() {
       {(() => {
         // Aggregate daily data into weekly buckets
         const weekMap = {}
-        ;[...ts].sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(({ date, qty }) => {
-          const d = new Date(date)
-          // Week key: ISO week start (Monday)
-          const day = d.getDay()
-          const diff = (day === 0 ? -6 : 1) - day
-          const weekStart = new Date(d)
-          weekStart.setDate(d.getDate() + diff)
-          const key = weekStart.toISOString().slice(0, 10)
-          if (!weekMap[key]) weekMap[key] = { date: key, total: 0, count: 0 }
-          weekMap[key].total += qty
-          weekMap[key].count += 1
-        })
+          ;[...ts].sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(({ date, qty }) => {
+            const d = new Date(date)
+            // Week key: ISO week start (Monday)
+            const day = d.getDay()
+            const diff = (day === 0 ? -6 : 1) - day
+            const weekStart = new Date(d)
+            weekStart.setDate(d.getDate() + diff)
+            const key = weekStart.toISOString().slice(0, 10)
+            if (!weekMap[key]) weekMap[key] = { date: key, total: 0, count: 0 }
+            weekMap[key].total += qty
+            weekMap[key].count += 1
+          })
         const weekly = Object.values(weekMap)
           .sort((a, b) => new Date(a.date) - new Date(b.date))
           .map(w => ({ date: w.date, qty: Math.round(w.total / w.count) }))
@@ -119,17 +119,17 @@ export default function DemandIntelligence() {
           <div className="chart-container">
             <div className="chart-title"><TrendingUp size={15} /> Weekly Avg Demand Volume — All Facilities</div>
             <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={weeklyWithMA} margin={{ top:10, right:20, left:10, bottom:30 }}>
+              <AreaChart data={weeklyWithMA} margin={{ top: 10, right: 20, left: 10, bottom: 30 }}>
                 <defs>
                   <linearGradient id="demGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#00E5FF" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#00E5FF" stopOpacity={0}    />
+                    <stop offset="5%" stopColor="#00E5FF" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#00E5FF" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.6} />
                 <XAxis
                   dataKey="date"
-                  tick={{ fontSize:10, fill:'var(--text-muted)', fontFamily:'monospace' }}
+                  tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'monospace' }}
                   tickLine={false}
                   interval={tickInterval}
                   angle={-30}
@@ -137,15 +137,15 @@ export default function DemandIntelligence() {
                   height={45}
                 />
                 <YAxis
-                  tick={{ fontSize:10, fill:'var(--text-muted)' }}
+                  tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
                   tickLine={false}
                   axisLine={false}
                   width={72}
                   tickFormatter={v => v.toLocaleString()}
                 />
                 <Tooltip
-                  contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }}
-                  labelStyle={{ color:'var(--text-secondary)' }}
+                  contentStyle={{ background: '#111827', border: '1px solid #253347', borderRadius: 8, fontSize: 12, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}
+                  labelStyle={{ color: 'var(--text-secondary)' }}
                   formatter={(v, name) => [v?.toLocaleString(), name === 'qty' ? 'Weekly Avg Units' : '4-Wk Trend']}
                 />
                 <Area
@@ -180,12 +180,12 @@ export default function DemandIntelligence() {
         const dateMap = {}
         facilities.forEach(fac => {
           const key = fac.split('(')[0].trim()
-          ;[...data.plant_series[fac]]
-            .sort((a, b) => new Date(a.date) - new Date(b.date))
-            .forEach(({ date, qty }) => {
-              if (!dateMap[date]) dateMap[date] = { date }
-              dateMap[date][key] = qty
-            })
+            ;[...data.plant_series[fac]]
+              .sort((a, b) => new Date(a.date) - new Date(b.date))
+              .forEach(({ date, qty }) => {
+                if (!dateMap[date]) dateMap[date] = { date }
+                dateMap[date][key] = qty
+              })
         })
         const merged = Object.values(dateMap).sort((a, b) => new Date(a.date) - new Date(b.date))
         const facKeys = facilities.map(f => f.split('(')[0].trim())
@@ -196,11 +196,11 @@ export default function DemandIntelligence() {
           <div className="chart-container">
             <div className="chart-title">📊 Per-Facility Weekly Demand</div>
             <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={merged} margin={{ top:10, right:20, left:10, bottom:40 }}>
+              <LineChart data={merged} margin={{ top: 10, right: 20, left: 10, bottom: 40 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#253347" strokeOpacity={0.8} />
                 <XAxis
                   dataKey="date"
-                  tick={{ fontSize:10, fill:'var(--text-muted)' }}
+                  tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
                   tickLine={false}
                   interval={tickInterval}
                   angle={-35}
@@ -208,17 +208,17 @@ export default function DemandIntelligence() {
                   height={50}
                 />
                 <YAxis
-                  tick={{ fontSize:10, fill:'var(--text-muted)' }}
+                  tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
                   tickLine={false}
                   axisLine={false}
                   width={72}
                   tickFormatter={v => v.toLocaleString()}
                 />
                 <Tooltip
-                  contentStyle={{ background:'#111827', border:'1px solid #253347', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.5)' }}
+                  contentStyle={{ background: '#111827', border: '1px solid #253347', borderRadius: 8, fontSize: 12, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}
                   formatter={(v, name) => [v?.toLocaleString(), name]}
                 />
-                <Legend wrapperStyle={{ fontSize:11, paddingTop:8 }} />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                 {facKeys.map((key, i) => (
                   <Line
                     key={key}
@@ -242,11 +242,11 @@ export default function DemandIntelligence() {
           <div className="card-header"><div className="card-title">📊 Schedule Status Breakdown</div></div>
           <div className="stat-row">
             <span className="stat-row-label">On-Time Events</span>
-            <span className="stat-row-value" style={{ color:'var(--green)' }}>{sched.on_time?.toLocaleString()}</span>
+            <span className="stat-row-value" style={{ color: 'var(--green)' }}>{sched.on_time?.toLocaleString()}</span>
           </div>
           <div className="stat-row">
             <span className="stat-row-label">Delayed Events</span>
-            <span className="stat-row-value" style={{ color:'var(--red)' }}>{sched.delayed?.toLocaleString()}</span>
+            <span className="stat-row-value" style={{ color: 'var(--red)' }}>{sched.delayed?.toLocaleString()}</span>
           </div>
           <div className="stat-row">
             <span className="stat-row-label">Total Records</span>
@@ -255,7 +255,7 @@ export default function DemandIntelligence() {
           <div className="stat-row">
             <span className="stat-row-label">On-Time Rate</span>
             <span className="stat-row-value">
-              {sched.total > 0 ? ((sched.on_time / sched.total)*100).toFixed(1) : '—'}%
+              {sched.total > 0 ? ((sched.on_time / sched.total) * 100).toFixed(1) : '—'}%
             </span>
           </div>
         </div>
@@ -282,7 +282,7 @@ export default function DemandIntelligence() {
           </div>
           <div className="stat-row">
             <span className="stat-row-label">Risk Level</span>
-            <span className="stat-row-value" style={{ color: riskColor, textTransform:'uppercase' }}>{risk}</span>
+            <span className="stat-row-value" style={{ color: riskColor, textTransform: 'uppercase' }}>{risk}</span>
           </div>
           <div className="stat-row">
             <span className="stat-row-label">Anomalies</span>
