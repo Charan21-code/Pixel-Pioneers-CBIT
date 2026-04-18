@@ -172,15 +172,20 @@ function AppInner() {
       }
     }
 
+    // Wait 2 s for the background thread to set is_running = True before polling
+    await wait(2000)
+
     try {
-      for (let i = 0; i < 45; i++) {
+      for (let i = 0; i < 60; i++) {
         const status = await fetchStatus()
-        if (i > 0 && status && !status.is_running) break
-        await wait(1000)
+        // Only exit the loop once the backend explicitly reports it finished
+        if (i >= 2 && status && !status.is_running) break
+        await wait(1500)
       }
     } catch (e) {
       console.error('Status polling failed:', e)
     } finally {
+      setRunning(false)
       await fetchStatus()
     }
   }

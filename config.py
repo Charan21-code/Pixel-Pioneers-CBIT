@@ -20,7 +20,7 @@ DB_PATH  = os.path.join(BASE_DIR, "production.db")
 OLLAMA_MODEL    = "gemma4:e2b"
 OLLAMA_URL      = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
-OLLAMA_TIMEOUT  = 25.0   # seconds; if a call exceeds this, return {} fallback
+OLLAMA_TIMEOUT  = 15.0   # seconds; keep short so fallback kicks in quickly
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Finance thresholds (USD)
@@ -28,7 +28,7 @@ OLLAMA_TIMEOUT  = 25.0   # seconds; if a call exceeds this, return {} fallback
 FINANCE = {
     "auto_approve_max":   1_000,    # cost below this → instant approve
     "hitl_escalate_min":  10_000,   # cost above this → human review queue
-    "monthly_budget":     500_000,  # total allowed PO spend per calendar month
+    "monthly_budget":   2_000_000,  # realistic multi-plant global budget (USD/month)
     "overhead_multiplier": 1.15,    # 15% overhead added to every cost estimate
 }
 
@@ -101,7 +101,7 @@ NLP = {
 # HITL (Human-In-The-Loop)
 # ─────────────────────────────────────────────────────────────────────────────
 HITL = {
-    "health_score_min": 50,  # Orchestrator routes to HITL if finance health < this
+    "health_score_min": 30,  # Orchestrator routes to HITL if finance health < this
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

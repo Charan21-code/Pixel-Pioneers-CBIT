@@ -67,10 +67,26 @@ export default function NlpCommandPanel() {
   const [loading,   setLoading]   = useState(false)
   const [plants,    setPlants]    = useState([])
   const [selPlant,  setSelPlant]  = useState('')
+  const [ollamaOnline, setOllamaOnline] = useState(null)  // null=checking, true=online, false=offline
   const endRef = useRef(null)
 
   useEffect(() => {
     api.getPlants().then(d => setPlants(d.plants?.map(p=>p.name) || [])).catch(()=>{})
+  }, [])
+
+  // Ping Ollama availability via backend health
+  useEffect(() => {
+    const checkOllama = async () => {
+      try {
+        const res = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(3000) })
+        setOllamaOnline(res.ok)
+      } catch {
+        setOllamaOnline(false)
+      }
+    }
+    checkOllama()
+    const id = setInterval(checkOllama, 30000)
+    return () => clearInterval(id)
   }, [])
 
   useEffect(() => {
@@ -135,9 +151,15 @@ export default function NlpCommandPanel() {
       </div>
 
       {/* Info */}
-      <div className="info-box" style={{ marginBottom:16 }}>
-        <b>💡 Supported commands:</b> Ask questions about any agent, approve/reject HITL items, escalate issues, or query system status.
-        Ollama LLM integration active — responses use heuristic parsing when Ollama is offline.
+      <div className="info-box" style={{ marginBottom:16, display:'flex', gap:12, alignItems:'flex-start', flexWrap:'wrap' }}>
+        <div style={{ flex:1 }}>
+          <b>💡 Supported commands:</b> Ask questions about any agent, approve/reject HITL items, escalate issues, or query system status.
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, whiteSpace:'nowrap' }}>
+          {ollamaOnline === null && <span style={{ color:'var(--text-muted)' }}>🔄 Checking LLM...</span>}
+          {ollamaOnline === true  && <span style={{ color:'var(--green)', fontWeight:600 }}>🟢 Ollama LLM Online — rich AI responses active</span>}
+          {ollamaOnline === false && <span style={{ color:'var(--amber)', fontWeight:600 }}>🟡 Ollama offline — using smart heuristic responses</span>}
+        </div>
       </div>
 
       {/* Suggested Queries */}

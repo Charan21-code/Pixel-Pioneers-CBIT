@@ -358,7 +358,7 @@ class FinanceAgent(BaseAgent):
         prompt = f"""You are a cost-reduction analyst for a global electronics manufacturing company.
 
 Current financial metrics:
-- Budget used: {pct_used:.1f}% of $500,000 monthly budget
+- Budget used: {pct_used:.1f}% of ${config.FINANCE['monthly_budget']:,} monthly budget
 - Financial risk score: {risk_score:.0f}/100
 - Carbon penalty this period: ${total_penalty:,.0f} ({peak_ratio:.0f}% from peak hours)
 - Emergency reorder requests triggered: {n_reorders}
@@ -430,7 +430,7 @@ Respond ONLY with a JSON object:
         prompt = f"""You are a CFO assistant summarising the current financial health of a global electronics factory.
 
 Key numbers:
-- Monthly budget: $500,000
+- Monthly budget: ${config.FINANCE['monthly_budget']:,}
 - Spent to date:  ${spent_usd:,.0f} ({pct_used:.1f}%)
 - Remaining:      ${remaining_usd:,.0f}
 - Proposed plan cost: ${proposed_cost:,.0f}

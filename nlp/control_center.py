@@ -564,8 +564,48 @@ def build_query_answer(
                 "Scheduler Agent",
             )
 
+    if any(token in lower for token in (
+        "health", "status", "system", "overview", "summary", "how is", "what is"
+    )):
+        conflicts = out.get("conflicts", [])
+        n_critical = len([c for c in conflicts if c.get("severity") == "CRITICAL"])
+        n_warning  = len([c for c in conflicts if c.get("severity") == "WARNING"])
+        finance    = out.get("finance", {})
+        forecast   = out.get("forecast", {})
+        health     = out.get("system_health", 0)
+        status     = out.get("final_status", "UNKNOWN")
+        gate       = finance.get("gate_decision", "UNKNOWN")
+        risk_level = forecast.get("risk_level", "unknown")
+        return (
+            f"System status: {status} | Health: {health:.0f}/100 | Finance gate: {gate} | "
+            f"Demand risk: {risk_level} | Active conflicts: {n_critical} critical, {n_warning} warnings. "
+            f"{'HITL review required.' if n_critical > 0 else 'No blocking issues.'}",
+            "Orchestrator Agent",
+        )
+
+    # General / unmatched query — return a rich system snapshot
+    conflicts  = out.get("conflicts", [])
+    n_critical = len([c for c in conflicts if c.get("severity") == "CRITICAL"])
+    n_warning  = len([c for c in conflicts if c.get("severity") == "WARNING"])
+    finance    = out.get("finance", {})
+    forecast   = out.get("forecast", {})
+    health     = out.get("system_health", 0)
+    status     = out.get("final_status", "UNKNOWN")
+    forecast_qty = forecast.get("forecast_qty", 0)
+    gate_decision = finance.get("gate_decision", "UNKNOWN")
+    pending_total = (pending_counts or {}).get("total", 0)
+    scheduler  = out.get("scheduler", {})
+    n_plants   = len(scheduler)
+    avg_util   = (
+        sum(p.get("utilisation_pct", 0) for p in scheduler.values()) / max(n_plants, 1)
+        if scheduler else 0
+    )
     return (
-        f"System status is {out.get('final_status', 'UNKNOWN')} with health "
-        f"{out.get('system_health', 0):.0f}/100 and {len(out.get('conflicts', []))} active conflicts.",
+        f"OPS//CORE System Snapshot — Status: {status} | Health: {health:.0f}/100 | "
+        f"Finance gate: {gate_decision} | 7-day forecast: {forecast_qty:,} units | "
+        f"Active conflicts: {n_critical} critical + {n_warning} warnings | "
+        f"HITL pending: {pending_total} item(s) | "
+        f"Plants scheduled: {n_plants} (avg {avg_util:.1f}% utilisation). "
+        f"Try asking about inventory, machines, carbon, finance, or a specific plant for deeper insight.",
         "Orchestrator Agent",
     )
